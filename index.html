@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Finexy — Dashboard</title>
+<script>
+// ── SESSION GUARD: redirect to auth if not logged in ──
+(function(){
+  const s = sessionStorage.getItem('finexy_session');
+  if (!s) { window.location.replace('auth.html'); }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ░░ SIDEBAR ░░ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="#fff"/></svg>
+    </div>
+    <span>Finexy</span>
+  </div>
+  <nav class="sb-nav">
+    <div class="sb-section">
+      <p class="sb-label">Main</p>
+      <a class="sb-link active" data-page="dashboard">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        Dashboard
+      </a>
+      <a class="sb-link" data-page="analytics">
+        <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+        Analytics
+      </a>
+      <a class="sb-link" data-page="customers">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Customers
+      </a>
+      <a class="sb-link" data-page="orders">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Orders
+      </a>
+    </div>
+    <div class="sb-section">
+      <p class="sb-label">Products</p>
+      <a class="sb-link" data-page="inventory">
+        <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+        Inventory
+        <span class="sb-badge accent">Stock</span>
+      </a>
+      <a class="sb-link" data-page="store">
+        <svg viewBox="0 0 24 24"><path d="M3 9l1-5h16l1 5"/><path d="M3 9h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/></svg>
+        Store
+      </a>
+      <a class="sb-link" data-page="discounts">
+        <svg viewBox="0 0 24 24"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/></svg>
+        Discounts
+      </a>
+    </div>
+    <div class="sb-section">
+      <p class="sb-label">System</p>
+      <a class="sb-link" data-page="user-management" style="display:none">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Users
+      </a>
+      <a class="sb-link" data-page="deliveries" style="display:none">
+        <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8zM5.5 21a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM19.5 21a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
+        Deliveries
+      </a>
+      <a class="sb-link" data-page="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </a>
+      <a class="sb-link" data-page="helpdesk">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
+        Help Desk
+      </a>
+      <a class="sb-link logout-link" id="logoutBtn">
+        <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        Log out
+      </a>
+    </div>
+  </nav>
+</aside>
+<div class="sb-overlay" id="sbOverlay"></div>
+
+<!-- ░░ MAIN ░░ -->
+<div class="main">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <button class="burger" id="burger">
+      <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="top-search">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="topSearch" type="text" placeholder="Search anything… (⌘K)"/>
+    </div>
+    <div class="top-right">
+      <button class="top-icon" id="notifTrigger">
+        <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="pip" id="notifPip" style="display:none"></span>
+      </button>
+      <div class="top-user" id="topUser">
+        <div class="top-avatar" id="topAvatar">?</div>
+        <div class="top-uinfo"><b id="topName">Loading…</b><small id="topBusiness">Finexy</small></div>
+        <svg class="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+    </div>
+  </header>
+
+  <!-- PAGES -->
+  <div class="content">
+
+    <!-- ══ DASHBOARD ══ -->
+    <section class="page active" id="page-dashboard">
+      <div class="ph">
+        <div><h1>Sales Overview</h1><p class="ph-sub">Your business at a glance</p></div>
+        <div class="ph-actions">
+          <button class="btn-ghost" onclick="navigateTo('inventory')">
+            <svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            Inventory
+          </button>
+          <button class="btn-primary" id="addOrderBtn">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Order
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-head"><span>Total Sales</span><div class="kpi-ico c1"><svg viewBox="0 0 24 24"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></div></div>
+          <div class="kpi-num" id="kpiSales">0</div>
+          <div class="kpi-foot">Total orders placed</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head"><span>New Customers</span><div class="kpi-ico c2"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div>
+          <div class="kpi-num" id="kpiCustomers">0</div>
+          <div class="kpi-foot">Unique customers</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head"><span>Return Products</span><div class="kpi-ico c3"><svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg></div></div>
+          <div class="kpi-num" id="kpiReturns">0</div>
+          <div class="kpi-foot">Cancelled orders</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head"><span>Total Revenue</span><div class="kpi-ico c4"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div></div>
+          <div class="kpi-num" id="kpiRevenue">$0.00</div>
+          <div class="kpi-foot">From completed orders</div>
+        </div>
+      </div>
+
+      <!-- Stock Alert Banner -->
+      <div id="stockAlertBanner"></div>
+
+      <!-- Orders Table -->
+      <div class="card">
+        <div class="card-top">
+          <h3>Orders</h3>
+          <div class="row-tools">
+            <div class="mini-search">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input id="orderSearch" type="text" placeholder="Search orders…"/>
+            </div>
+            <div class="drop-wrap">
+              <button class="btn-ghost sm" id="sortToggle">
+                <svg viewBox="0 0 24 24"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/></svg>
+                Sort
+              </button>
+              <div class="drop-menu" id="sortMenu">
+                <div class="drop-item" data-sort="date-desc">Newest first</div>
+                <div class="drop-item" data-sort="date-asc">Oldest first</div>
+                <div class="drop-item" data-sort="total-desc">Highest total</div>
+                <div class="drop-item" data-sort="total-asc">Lowest total</div>
+                <div class="drop-item" data-sort="status">By status</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th><input type="checkbox" id="selectAll"/></th>
+              <th data-col="id">Order ID</th>
+              <th data-col="date">Date</th>
+              <th data-col="customer">Customer</th>
+              <th data-col="category">Category</th>
+              <th data-col="status">Status</th>
+              <th data-col="items">Items</th>
+              <th data-col="total">Total</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody id="ordersTbody"></tbody>
+          </table>
+        </div>
+        <div class="tbl-foot">
+          <span id="tblInfo">No orders yet</span>
+          <div id="pager" class="pager"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ INVENTORY ══ -->
+    <section class="page" id="page-inventory">
+      <div class="ph">
+        <div><h1>Inventory</h1><p class="ph-sub">Add, edit, restock or remove products</p></div>
+        <button class="btn-primary" id="addProductBtn">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add Product
+        </button>
+      </div>
+
+      <!-- Inventory KPIs -->
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-head"><span>Total Products</span><div class="kpi-ico c1"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div></div><div class="kpi-num" id="invTotal">0</div><div class="kpi-foot">All categories</div></div>
+        <div class="kpi-card"><div class="kpi-head"><span>In Stock</span><div class="kpi-ico c2"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div></div><div class="kpi-num" id="invInStock">0</div><div class="kpi-foot">Available items</div></div>
+        <div class="kpi-card"><div class="kpi-head"><span>Low Stock</span><div class="kpi-ico c3"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div></div><div class="kpi-num" id="invLow">0</div><div class="kpi-foot">Need restocking</div></div>
+        <div class="kpi-card"><div class="kpi-head"><span>Out of Stock</span><div class="kpi-ico c4"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div></div><div class="kpi-num" id="invOut">0</div><div class="kpi-foot">Unavailable</div></div>
+      </div>
+
+      <!-- Filters -->
+      <div class="inv-filters">
+        <div class="mini-search wide">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="invSearch" type="text" placeholder="Search by name, SKU or category…"/>
+        </div>
+        <select id="invCatFilter" class="fsel">
+          <option value="">All Categories</option>
+          <option>Shoes</option><option>Clothing</option><option>Accessories</option>
+          <option>Bags</option><option>Sportswear</option><option>Electronics</option>
+          <option>Food & Drinks</option><option>Health & Beauty</option><option>Other</option>
+        </select>
+        <select id="invStatusFilter" class="fsel">
+          <option value="">All Status</option>
+          <option value="in_stock">In Stock</option>
+          <option value="low_stock">Low Stock</option>
+          <option value="out_of_stock">Out of Stock</option>
+        </select>
+        <button class="btn-ghost sm" id="exportInvBtn">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export CSV
+        </button>
+      </div>
+
+      <div class="card">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th><input type="checkbox" id="invSelectAll"/></th>
+              <th>Image</th>
+              <th>SKU</th>
+              <th>Product Name</th>
+              <th>Category</th>
+              <th>Unit Price</th>
+              <th>Qty in Stock</th>
+              <th>Low Stock At</th>
+              <th>Status</th>
+              <th>Last Updated</th>
+              <th>Actions</th>
+            </tr></thead>
+            <tbody id="invTbody"></tbody>
+          </table>
+        </div>
+        <div class="tbl-foot">
+          <span id="invInfo">No products yet — click "Add Product" to begin</span>
+          <div id="bulkBar" class="bulk-bar" style="display:none">
+            <span id="bulkCount"></span>
+            <button class="btn-ghost sm" id="bulkRestockBtn">📦 Restock All (+50)</button>
+            <button class="btn-red-sm" id="bulkDeleteBtn">🗑 Delete Selected</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ ANALYTICS ══ -->
+    <section class="page" id="page-analytics">
+      <div class="ph"><h1>Analytics</h1><p class="ph-sub">Performance metrics</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg><h2>Analytics</h2><p>Charts and metrics will populate as you add orders.</p><button class="btn-primary" onclick="navigateTo('dashboard')">← Dashboard</button></div>
+    </section>
+
+    <!-- ══ CUSTOMERS ══ -->
+    <section class="page" id="page-customers">
+      <div class="ph"><h1>Customers</h1><p class="ph-sub">Manage your customer base</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h2>Customers</h2><p>Customer list will appear here as you add orders.</p></div>
+    </section>
+
+    <!-- ══ ORDERS ══ -->
+    <section class="page" id="page-orders">
+      <div class="ph"><h1>All Orders</h1><p class="ph-sub">Complete order history</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><h2>Orders</h2><p>All orders are managed from the Dashboard.</p><button class="btn-primary" onclick="navigateTo('dashboard')">← Go to Dashboard</button></div>
+    </section>
+
+    <!-- ══ STORE ══ -->
+    <section class="page" id="page-store">
+      <div class="ph"><h1>Store</h1><p class="ph-sub">Product catalogue</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M3 9l1-5h16l1 5"/><path d="M3 9h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/></svg><h2>Store</h2><p>Storefront management coming soon.</p></div>
+    </section>
+
+    <!-- ══ DISCOUNTS ══ -->
+    <section class="page" id="page-discounts">
+      <div class="ph"><h1>Discounts</h1><p class="ph-sub">Coupons and promotions</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/></svg><h2>Discounts</h2><p>Promotional codes and discount rules coming soon.</p></div>
+    </section>
+
+    <!-- ══ SETTINGS ══ -->
+    <section class="page" id="page-settings">
+      <div class="ph"><h1>Settings</h1><p class="ph-sub">Account and system preferences</p></div>
+      <div class="settings-wrap">
+        <div class="card">
+          <h3 class="card-title">Profile</h3>
+          <div class="form-row"><div class="fg"><label>Full Name</label><input type="text" id="settingName"/></div><div class="fg"><label>Email</label><input type="email" id="settingEmail" readonly style="background:var(--bg);cursor:default"/></div></div>
+          <div class="form-row"><div class="fg"><label>Business / Store Name</label><input type="text" id="settingBusiness"/></div><div class="fg"><label>Currency</label><select id="settingCurrency"><option value="$">USD ($)</option><option value="€">EUR (€)</option><option value="£">GBP (£)</option><option value="₦">NGN (₦)</option></select></div></div>
+          <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Security</h3>
+          <div class="fg" style="margin-bottom:14px"><label>Current Password</label><input type="password" id="pwCurrent" placeholder="••••••••"/></div>
+          <div class="fg" style="margin-bottom:14px"><label>New Password</label><input type="password" id="pwNew" placeholder="Min. 6 characters"/></div>
+          <div class="fg" style="margin-bottom:20px"><label>Confirm New Password</label><input type="password" id="pwConfirm" placeholder="Repeat new password"/></div>
+          <button class="btn-primary" onclick="changePassword()">Update Password</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ HELP DESK ══ -->
+    <section class="page" id="page-helpdesk">
+      <div class="ph"><h1>Help Desk</h1><p class="ph-sub">Support & documentation</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg><h2>Help Desk</h2><p>Support tickets and documentation coming soon.</p></div>
+    </section>
+
+    <!-- ══ USER MANAGEMENT (Admin only) ══ -->
+    <section class="page" id="page-user-management">
+      <div class="ph"><h1>User Management 👥</h1></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h2>Loading…</h2></div>
+    </section>
+
+    <!-- ══ DELIVERIES (Rider only) ══ -->
+    <section class="page" id="page-deliveries">
+      <div class="ph"><h1>My Deliveries 🛵</h1></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8z"/></svg><h2>Loading…</h2></div>
+    </section>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<!-- ░░ NOTIFICATIONS ░░ -->
+<div class="notif-panel" id="notifPanel">
+  <div class="notif-hd"><h4>Notifications</h4><button id="markAllRead">Mark all read</button></div>
+  <div id="notifBody"><p class="notif-empty">No notifications yet.</p></div>
+</div>
+
+<!-- ░░ TOAST ░░ -->
+<div class="toast" id="toast"></div>
+
+<!-- ░░ MAIN MODAL ░░ -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal-box" id="modalBox">
+    <div class="modal-hd"><h3 id="modalTitle"></h3><button id="modalClose">✕</button></div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<!-- ░░ CONFIRM MODAL ░░ -->
+<div class="modal-bg" id="confirmBg">
+  <div class="modal-box sm">
+    <div class="modal-hd"><h3 id="confirmTitle">Confirm</h3><button id="confirmClose">✕</button></div>
+    <div style="padding:20px 24px 24px">
+      <p id="confirmMsg" style="color:var(--t2);font-size:.88rem;line-height:1.6;margin-bottom:22px"></p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn-ghost" id="confirmNo">Cancel</button>
+        <button class="btn-red" id="confirmYes">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
