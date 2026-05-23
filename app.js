@@ -12,15 +12,17 @@ const SUPA_URL = 'https://ymkgqqerdocfcgyphfzs.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlta2dxcWVyZG9jZmNneXBoZnpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0ODA3MzUsImV4cCI6MjA5NTA1NjczNX0.SqwwSpwvsstfumhpTJasSsGMbe0LAm7Z3N-H0U2PoVc';
 
 async function sbQuery(path, options={}) {
-  const res = await fetch(SUPA_URL + '/rest/v1/' + path, {
-    headers: {
-      'apikey': SUPA_KEY,
-      'Authorization': 'Bearer ' + SUPA_KEY,
-      'Content-Type': 'application/json',
-      'Prefer': options.prefer || 'return=representation',
-    },
-    ...options,
-  });
+  const method  = options.method || 'GET';
+  const headers = {
+    'apikey':        SUPA_KEY,
+    'Authorization': 'Bearer ' + SUPA_KEY,
+    'Content-Type':  'application/json',
+  };
+  if (method === 'POST' || method === 'PATCH') headers['Prefer'] = 'return=representation';
+  if (method === 'DELETE') headers['Prefer'] = 'return=minimal';
+  const fetchOpts = { method, headers };
+  if (options.body) fetchOpts.body = options.body;
+  const res = await fetch(SUPA_URL + '/rest/v1/' + path, fetchOpts);
   if (!res.ok) { const e = await res.text(); throw new Error(e); }
   const txt = await res.text();
   return txt ? JSON.parse(txt) : [];
@@ -337,8 +339,8 @@ function renderUserManagementPage() {
     let visible = [];
     try {
       const visibleRoles = isAdmin ? ['manager','staff','rider'] : ['staff','rider'];
-      const roleFilter = visibleRoles.map(r => 'role=eq.'+r).join(',');
-      visible = await sbQuery('users?or=('+roleFilter+')&select=*&order=created_at.asc');
+      const roleFilter = 'role=in.('+visibleRoles.join(',')+')&';
+      visible = await sbQuery('users?'+roleFilter+'&select=*&order=created_at.asc');
     } catch(e) {
       pg.innerHTML = `<div class="ph"><h1>User Management 👥</h1></div><div style="padding:40px;text-align:center;color:#FCA5A5;">Failed to load users. Check your connection.</div>`;
       return;
