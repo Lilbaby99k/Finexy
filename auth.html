@@ -303,6 +303,27 @@ input,button{font-family:'DM Sans',sans-serif;outline:none}
 
 <script>
 /* ═══════════════════════════════════════
+   SUPABASE CONFIG
+═══════════════════════════════════════ */
+const SUPA_URL = 'https://ymkgqqerdocfcgyphfzs.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlta2dxcWVyZG9jZmNneXBoZnpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0ODA3MzUsImV4cCI6MjA5NTA1NjczNX0.SqwwSpwvsstfumhpTJasSsGMbe0LAm7Z3N-H0U2PoVc';
+
+async function sbQuery(path, options={}) {
+  const res = await fetch(SUPA_URL + '/rest/v1/' + path, {
+    headers: {
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer ' + SUPA_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': options.prefer || 'return=representation',
+    },
+    ...options,
+  });
+  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : [];
+}
+
+/* ═══════════════════════════════════════
    CONFIG — Access Codes (change these!)
 ═══════════════════════════════════════ */
 const ADMIN_CODE   = 'FINEXY-ADMIN-2026';
@@ -398,7 +419,7 @@ function chkStr(pw){
 window.chkStr=chkStr;
 
 /* ── SIGN UP ── */
-function doSignup(){
+async function doSignup(){
   const first=document.getElementById('sFirst').value.trim();
   const last =document.getElementById('sLast').value.trim();
   const biz  =document.getElementById('sBiz').value.trim();
@@ -407,45 +428,49 @@ function doSignup(){
   const role =sRole;
   const code =document.getElementById('sCode').value.trim();
 
-  // Show the relevant note now that they've clicked submit
   const isAdmin = role === 'admin';
   document.getElementById('aNote').style.display        = isAdmin ? 'flex' : 'none';
   document.getElementById('approvalNote').style.display = !isAdmin ? 'flex' : 'none';
   document.getElementById('postRegNote').style.display  = 'none';
 
-  if(!first||!last)          {showMsg('smsg','smsgT','Enter your first and last name.','error');return;}
-  if(!biz)                   {showMsg('smsg','smsgT','Enter your business or store name.','error');return;}
+  if(!first||!last)               {showMsg('smsg','smsgT','Enter your first and last name.','error');return;}
+  if(!biz)                        {showMsg('smsg','smsgT','Enter your business or store name.','error');return;}
   if(!email||!email.includes('@')){showMsg('smsg','smsgT','Enter a valid email address.','error');return;}
-  if(pw.length<6)            {showMsg('smsg','smsgT','Password must be at least 6 characters.','error');return;}
-
-  const expectedCode = ROLE_CODES[role];
-  if(!code) {showMsg('smsg','smsgT','Enter the Access Code for your role.','error');return;}
-  if(code !== expectedCode) {showMsg('smsg','smsgT','Invalid Access Code. Contact your administrator.','error');return;}
-
-  const users=JSON.parse(localStorage.getItem('finexy_users')||'[]');
-  if(users.find(u=>u.email===email)){showMsg('smsg','smsgT','An account with this email already exists.','error');return;}
+  if(pw.length<6)                 {showMsg('smsg','smsgT','Password must be at least 6 characters.','error');return;}
+  if(!code)                       {showMsg('smsg','smsgT','Enter the Access Code for your role.','error');return;}
+  if(code !== ROLE_CODES[role])   {showMsg('smsg','smsgT','Invalid Access Code. Contact your administrator.','error');return;}
 
   const btn=document.getElementById('sBtn');
   btn.classList.add('loading');
 
-  setTimeout(()=>{
-    // Admin accounts are auto-approved; others start as pending
+  try {
+    // Check if email already exists
+    const existing = await sbQuery('users?email=eq.'+encodeURIComponent(email)+'&select=id');
+    if(existing.length > 0){
+      btn.classList.remove('loading');
+      showMsg('smsg','smsgT','An account with this email already exists.','error');
+      return;
+    }
+
     const approved = role === 'admin';
-    const user={id:Date.now(),first,last,business:biz,email,password:pw,role,approved,created:new Date().toISOString()};
-    users.push(user);
-    localStorage.setItem('finexy_users',JSON.stringify(users));
+    const newUser = { first, last, business: biz, email, password: pw, role, approved, deactivated: false };
+    const result = await sbQuery('users', {
+      method: 'POST',
+      body: JSON.stringify(newUser),
+    });
+
     btn.classList.remove('loading');
+    const user = result[0];
+
     if(approved){
-      sessionStorage.setItem('finexy_session',JSON.stringify(mkSession(user)));
+      sessionStorage.setItem('finexy_session', JSON.stringify(mkSession(user)));
       showMsg('smsg','smsgT','Account created! Redirecting…','success');
-      setTimeout(()=>window.location.href='index.html',900);
+      setTimeout(()=>window.location.href='index.html', 900);
     } else {
-      // Hide the "after registering..." note and show the post-registration success note
       document.getElementById('approvalNote').style.display = 'none';
       document.getElementById('aNote').style.display        = 'none';
       document.getElementById('postRegNote').style.display  = 'flex';
-      document.getElementById('smsg').className='fmsg'; // clear any error
-      // reset the form
+      document.getElementById('smsg').className='fmsg';
       document.getElementById('sFirst').value='';
       document.getElementById('sLast').value='';
       document.getElementById('sBiz').value='';
@@ -454,12 +479,15 @@ function doSignup(){
       document.getElementById('sCode').value='';
       chkStr('');
     }
-  },1200);
+  } catch(err) {
+    btn.classList.remove('loading');
+    showMsg('smsg','smsgT','Error: ' + err.message, 'error');
+  }
 }
 window.doSignup=doSignup;
 
 /* ── SIGN IN ── */
-function doLogin(){
+async function doLogin(){
   const email=document.getElementById('lEmail').value.trim().toLowerCase();
   const pw   =document.getElementById('lPw').value;
   const role =lRole;
@@ -469,37 +497,41 @@ function doLogin(){
   const btn=document.getElementById('lBtn');
   btn.classList.add('loading');
 
-  setTimeout(()=>{
-    const users=JSON.parse(localStorage.getItem('finexy_users')||'[]');
-    const user=users.find(u=>u.email===email&&u.password===pw);
-    if(!user){btn.classList.remove('loading');showMsg('lmsg','lmsgT','Incorrect email or password.','error');return;}
-    if(user.role!==role){
+  try {
+    const results = await sbQuery('users?email=eq.'+encodeURIComponent(email)+'&select=*');
+    const user = results[0];
+
+    if(!user || user.password !== pw){
+      btn.classList.remove('loading');
+      showMsg('lmsg','lmsgT','Incorrect email or password.','error');
+      return;
+    }
+    if(user.role !== role){
       btn.classList.remove('loading');
       showMsg('lmsg','lmsgT',`This account is "${RC[user.role]?.label||user.role}", not "${RC[role].label}". Select the correct role.`,'error');
       return;
     }
-    // Check pending approval for non-admin roles
-    if(user.role !== 'admin' && !user.approved){
+    if(user.deactivated){
       btn.classList.remove('loading');
-      // Check if deactivated vs just pending
-      if(user.deactivated){
-        showMsg('lmsg','lmsgT','🚫 Your account has been deactivated. Contact your Admin or Manager to reactivate it.','error');
-      } else {
-        btn.classList.add('loading');
-        btn.querySelector('.bl').textContent = 'Processing…';
-        setTimeout(()=>{
-          btn.classList.remove('loading');
-          btn.querySelector('.bl').textContent = RC[lRole].btnLogin;
-          showMsg('lmsg','lmsgT','⏳ Your account is still being reviewed. Please wait for Admin approval.','error');
-        }, 1800);
-      }
+      showMsg('lmsg','lmsgT','🚫 Your account has been deactivated. Contact your Admin or Manager to reactivate it.','error');
       return;
     }
-    sessionStorage.setItem('finexy_session',JSON.stringify(mkSession(user)));
+    if(user.role !== 'admin' && !user.approved){
+      btn.classList.remove('loading');
+      showMsg('lmsg','lmsgT','⏳ Your account is pending approval. Please wait for your Admin or Manager to approve it.','error');
+      return;
+    }
+
+    sessionStorage.setItem('finexy_session', JSON.stringify(mkSession(user)));
     btn.classList.remove('loading');
     showMsg('lmsg','lmsgT',`Welcome back, ${user.first}! Redirecting…`,'success');
-    setTimeout(()=>window.location.href='index.html',900);
-  },1000);
+    setTimeout(()=>window.location.href='index.html', 900);
+
+  } catch(err) {
+    btn.classList.remove('loading');
+    showMsg('lmsg','lmsgT','Connection error. Please try again.','error');
+    console.error(err);
+  }
 }
 window.doLogin=doLogin;
 
@@ -508,14 +540,18 @@ function mkSession(u){
 }
 
 /* ── Forgot ── */
-function doForgot(){
+async function doForgot(){
   const email=document.getElementById('lEmail').value.trim().toLowerCase();
   if(!email||!email.includes('@')){showMsg('lmsg','lmsgT','Enter your email first.','error');return;}
-  const users=JSON.parse(localStorage.getItem('finexy_users')||'[]');
-  const user=users.find(u=>u.email===email);
-  if(!user){showMsg('lmsg','lmsgT','No account found with that email.','error');return;}
-  showMsg('lmsg','lmsgT','Reset sent! (MVP: check browser console F12)','success');
-  console.log(`[Finexy] ${email} (${user.role}) password: ${user.password}`);
+  try {
+    const results = await sbQuery('users?email=eq.'+encodeURIComponent(email)+'&select=email,role,password');
+    if(!results.length){showMsg('lmsg','lmsgT','No account found with that email.','error');return;}
+    const u = results[0];
+    showMsg('lmsg','lmsgT','Password hint: check browser console (F12)','success');
+    console.log(`[Finexy] ${u.email} (${u.role}) password: ${u.password}`);
+  } catch(e) {
+    showMsg('lmsg','lmsgT','Could not look up account.','error');
+  }
 }
 window.doForgot=doForgot;
 
