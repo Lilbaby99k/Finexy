@@ -6,6 +6,27 @@
 'use strict';
 
 /* ══════════════════════════════════════
+   SUPABASE CONFIG
+══════════════════════════════════════ */
+const SUPA_URL = 'https://ymkgqqerdocfcgyphfzs.supabase.co';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlta2dxcWVyZG9jZmNneXBoZnpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0ODA3MzUsImV4cCI6MjA5NTA1NjczNX0.SqwwSpwvsstfumhpTJasSsGMbe0LAm7Z3N-H0U2PoVc';
+
+async function sbQuery(path, options={}) {
+  const res = await fetch(SUPA_URL + '/rest/v1/' + path, {
+    headers: {
+      'apikey': SUPA_KEY,
+      'Authorization': 'Bearer ' + SUPA_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': options.prefer || 'return=representation',
+    },
+    ...options,
+  });
+  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : [];
+}
+
+/* ══════════════════════════════════════
    PERMISSIONS MAP
    true  = allowed | false = denied
 ══════════════════════════════════════ */
@@ -73,54 +94,53 @@ const ROLE_META = {
   rider:   { label:'Rider',   color:'#059669', bg:'rgba(5,150,105,.15)',  icon:'🛵' },
 };
 
-function initSession() {
+async function initSession() {
   const raw = sessionStorage.getItem('finexy_session');
   if (!raw) { window.location.replace('auth.html'); return; }
   try { CURRENT_USER = JSON.parse(raw); }
   catch(e) { window.location.replace('auth.html'); return; }
 
-  // Re-verify user status from localStorage on every page load
+  // Re-verify user status from Supabase on every page load
   if (CURRENT_USER.role !== 'admin') {
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-    const freshUser = users.find(u => u.id === CURRENT_USER.userId);
+    try {
+      const results = await sbQuery('users?id=eq.' + CURRENT_USER.userId + '&select=approved,deactivated');
+      const freshUser = results[0];
 
-    // Deactivated: account suspended
-    if (freshUser && freshUser.deactivated) {
-      document.body.innerHTML = `
-        <div style="min-height:100vh;background:#0C0D0F;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;color:#F5F5F7;">
-          <div style="background:#141518;border:1px solid rgba(239,68,68,.25);border-radius:18px;padding:48px 40px;max-width:440px;width:90%;text-align:center;">
-            <div style="font-size:3rem;margin-bottom:16px;">🚫</div>
-            <h2 style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;margin-bottom:10px;color:#FCA5A5;">Account Deactivated</h2>
-            <p style="color:#8A8F9E;font-size:.88rem;line-height:1.6;margin-bottom:28px;">
-              Your <strong style="color:#F5F5F7;">${(CURRENT_USER.role||'').charAt(0).toUpperCase()+(CURRENT_USER.role||'').slice(1)}</strong> account has been deactivated.<br/>
-              If you believe this is an error or have been re-hired, please contact your <strong style="color:#F5F5F7;">Admin or Manager</strong> to reactivate your account.
-            </p>
-            <button onclick="sessionStorage.removeItem('finexy_session');window.location.replace('auth.html');" style="padding:11px 28px;border-radius:10px;background:#EF4444;border:none;color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;">
-              Back to Sign In
-            </button>
-          </div>
-        </div>`;
-      return;
-    }
-
-    // Pending approval
-    if (freshUser && !freshUser.approved) {
-      document.body.innerHTML = `
-        <div style="min-height:100vh;background:#0C0D0F;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;color:#F5F5F7;">
-          <div style="background:#141518;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:48px 40px;max-width:420px;width:90%;text-align:center;">
-            <div style="font-size:3rem;margin-bottom:16px;">⏳</div>
-            <h2 style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;margin-bottom:10px;">Waiting for Approval</h2>
-            <p style="color:#8A8F9E;font-size:.88rem;line-height:1.6;margin-bottom:28px;">
-              Your <strong style="color:#F5F5F7;">${(CURRENT_USER.role||'').charAt(0).toUpperCase()+(CURRENT_USER.role||'').slice(1)}</strong> account is pending admin approval.<br/>
-              You will be able to access the dashboard once an Admin or Manager approves your registration.
-            </p>
-            <button onclick="sessionStorage.removeItem('finexy_session');window.location.replace('auth.html');" style="padding:11px 28px;border-radius:10px;background:#E8441A;border:none;color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;">
-              Back to Sign In
-            </button>
-          </div>
-        </div>`;
-      return;
-    }
+      if (freshUser && freshUser.deactivated) {
+        document.body.innerHTML = `
+          <div style="min-height:100vh;background:#0C0D0F;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;color:#F5F5F7;">
+            <div style="background:#141518;border:1px solid rgba(239,68,68,.25);border-radius:18px;padding:48px 40px;max-width:440px;width:90%;text-align:center;">
+              <div style="font-size:3rem;margin-bottom:16px;">🚫</div>
+              <h2 style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;margin-bottom:10px;color:#FCA5A5;">Account Deactivated</h2>
+              <p style="color:#8A8F9E;font-size:.88rem;line-height:1.6;margin-bottom:28px;">
+                Your <strong style="color:#F5F5F7;">${(CURRENT_USER.role||'').charAt(0).toUpperCase()+(CURRENT_USER.role||'').slice(1)}</strong> account has been deactivated.<br/>
+                Contact your <strong style="color:#F5F5F7;">Admin or Manager</strong> to reactivate your account.
+              </p>
+              <button onclick="sessionStorage.removeItem('finexy_session');window.location.replace('auth.html');" style="padding:11px 28px;border-radius:10px;background:#EF4444;border:none;color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;">
+                Back to Sign In
+              </button>
+            </div>
+          </div>`;
+        return;
+      }
+      if (freshUser && !freshUser.approved) {
+        document.body.innerHTML = `
+          <div style="min-height:100vh;background:#0C0D0F;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;color:#F5F5F7;">
+            <div style="background:#141518;border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:48px 40px;max-width:420px;width:90%;text-align:center;">
+              <div style="font-size:3rem;margin-bottom:16px;">⏳</div>
+              <h2 style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;margin-bottom:10px;">Waiting for Approval</h2>
+              <p style="color:#8A8F9E;font-size:.88rem;line-height:1.6;margin-bottom:28px;">
+                Your <strong style="color:#F5F5F7;">${(CURRENT_USER.role||'').charAt(0).toUpperCase()+(CURRENT_USER.role||'').slice(1)}</strong> account is pending approval.<br/>
+                You will be able to access the dashboard once an Admin or Manager approves your registration.
+              </p>
+              <button onclick="sessionStorage.removeItem('finexy_session');window.location.replace('auth.html');" style="padding:11px 28px;border-radius:10px;background:#E8441A;border:none;color:#fff;font-size:.88rem;font-weight:700;cursor:pointer;">
+                Back to Sign In
+              </button>
+            </div>
+          </div>`;
+        return;
+      }
+    } catch(e) { console.warn('Could not verify user status:', e); }
   }
 
   const role = CURRENT_USER.role || 'staff';
@@ -301,8 +321,8 @@ function applyRBACtoButtons() {
 
 /* ══════════════════════════════════════
    USER MANAGEMENT PAGE
-   Admin  → sees & manages: manager, staff, rider
-   Manager → sees & manages: staff, rider only
+   Admin  → manages: manager, staff, rider
+   Manager → manages: staff, rider only
 ══════════════════════════════════════ */
 function renderUserManagementPage() {
   const pg = document.getElementById('page-user-management');
@@ -311,185 +331,137 @@ function renderUserManagementPage() {
   const isAdmin   = CURRENT_USER && CURRENT_USER.role === 'admin';
   const isManager = CURRENT_USER && CURRENT_USER.role === 'manager';
 
-  function buildPage() {
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
+  async function buildPage() {
+    pg.innerHTML = `<div class="ph"><h1>User Management 👥</h1></div><div style="max-width:900px;padding:40px;text-align:center;color:var(--t2);">Loading users…</div>`;
 
-    // Admin sees manager + staff + rider; Manager sees staff + rider only
-    const visibleRoles = isAdmin ? ['manager','staff','rider'] : ['staff','rider'];
-    const visible = users.filter(u => visibleRoles.includes(u.role));
+    let visible = [];
+    try {
+      const visibleRoles = isAdmin ? ['manager','staff','rider'] : ['staff','rider'];
+      const roleFilter = visibleRoles.map(r => 'role=eq.'+r).join(',');
+      visible = await sbQuery('users?or=('+roleFilter+')&select=*&order=created_at.asc');
+    } catch(e) {
+      pg.innerHTML = `<div class="ph"><h1>User Management 👥</h1></div><div style="padding:40px;text-align:center;color:#FCA5A5;">Failed to load users. Check your connection.</div>`;
+      return;
+    }
 
-    // Buckets
     const pending     = visible.filter(u => !u.approved && !u.deactivated);
-    const active      = visible.filter(u => u.approved  && !u.deactivated);
-    const deactivated = visible.filter(u => u.deactivated);
+    const active      = visible.filter(u =>  u.approved && !u.deactivated);
+    const deactivated = visible.filter(u =>  u.deactivated);
 
     const roleColor = { manager:'#7C3AED', staff:'#0284C7', rider:'#059669' };
     const roleIcon  = { manager:'📊', staff:'🧑‍💼', rider:'🛵' };
 
-    // ── Row builder ──────────────────────────────────────────────────────────
     const userRow = (u, bucket) => {
-      const initials = (u.first[0] + (u.last?.[0] || '')).toUpperCase();
-      const avatarBg = u.deactivated ? '#4A4F5E' : (roleColor[u.role] || '#888');
-
-      // Status badge
+      const initials = (u.first[0] + (u.last?.[0]||'')).toUpperCase();
+      const avatarBg = u.deactivated ? '#4A4F5E' : (roleColor[u.role]||'#888');
       let statusBadge;
-      if (bucket === 'pending') {
-        statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(245,158,11,.15);color:#FCD34D;font-weight:600;white-space:nowrap;">⏳ Pending</span>`;
-      } else if (bucket === 'deactivated') {
-        statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(239,68,68,.12);color:#FCA5A5;font-weight:600;white-space:nowrap;">🚫 Inactive</span>`;
-      } else {
-        statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(34,197,94,.12);color:#86EFAC;font-weight:600;white-space:nowrap;">✅ Active</span>`;
-      }
+      if (bucket==='pending')     statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(245,158,11,.15);color:#FCD34D;font-weight:600;white-space:nowrap;">⏳ Pending</span>`;
+      else if (bucket==='deactivated') statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(239,68,68,.12);color:#FCA5A5;font-weight:600;white-space:nowrap;">🚫 Inactive</span>`;
+      else statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(34,197,94,.12);color:#86EFAC;font-weight:600;white-space:nowrap;">✅ Active</span>`;
 
-      // Action buttons per bucket
       let actionBtns = '';
-      if (bucket === 'pending') {
-        // Pending: Approve or Deactivate (reject)
-        actionBtns = `
-          <button onclick="approveUser(${u.id})" title="Approve account" style="padding:5px 12px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">✓ Approve</button>
-          <button onclick="deactivateUser(${u.id})" title="Reject / Deactivate" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">🚫 Deactivate</button>`;
-      } else if (bucket === 'active') {
-        // Active: Deactivate or Remove
-        actionBtns = `
-          <button onclick="deactivateUser(${u.id})" title="Deactivate — user can no longer sign in" style="padding:5px 11px;border-radius:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);color:#FCD34D;font-size:.75rem;cursor:pointer;white-space:nowrap;">⏸ Deactivate</button>
-          <button onclick="removeUser(${u.id})" title="Permanently remove user" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>`;
+      if (bucket==='pending') {
+        actionBtns = `<button onclick="approveUser(${u.id})" style="padding:5px 12px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">✓ Approve</button>
+          <button onclick="deactivateUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">🚫 Deactivate</button>`;
+      } else if (bucket==='active') {
+        actionBtns = `<button onclick="deactivateUser(${u.id})" style="padding:5px 11px;border-radius:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);color:#FCD34D;font-size:.75rem;cursor:pointer;white-space:nowrap;">⏸ Deactivate</button>
+          <button onclick="removeUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>`;
       } else {
-        // Deactivated: Reactivate (re-approve) or Remove
-        actionBtns = `
-          <button onclick="reactivateUser(${u.id})" title="Reactivate — restore account access" style="padding:5px 12px;border-radius:8px;border:none;background:#0284C7;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">♻ Reactivate</button>
-          <button onclick="removeUser(${u.id})" title="Permanently remove user" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>`;
+        actionBtns = `<button onclick="reactivateUser(${u.id})" style="padding:5px 12px;border-radius:8px;border:none;background:#0284C7;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">♻ Reactivate</button>
+          <button onclick="removeUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>`;
       }
 
-      return `
-        <div class="um-row" id="umrow-${u.id}" style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--border);transition:background .15s;${u.deactivated ? 'opacity:.6;' : ''}">
-          <div style="width:38px;height:38px;border-radius:50%;background:${avatarBg};display:grid;place-items:center;font-size:.85rem;font-weight:700;color:#fff;flex-shrink:0;">${initials}</div>
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:600;font-size:.88rem;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.first} ${u.last}</div>
-            <div style="font-size:.72rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.email}</div>
-          </div>
-          <span style="font-size:.7rem;padding:3px 9px;border-radius:20px;font-weight:700;background:${roleColor[u.role]||'#888'}22;color:${roleColor[u.role]||'#888'};white-space:nowrap;">${roleIcon[u.role]||''} ${(u.role||'').charAt(0).toUpperCase()+(u.role||'').slice(1)}</span>
-          ${statusBadge}
-          <div style="display:flex;gap:7px;flex-shrink:0;">${actionBtns}</div>
-        </div>`;
+      return `<div class="um-row" id="umrow-${u.id}" style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--border);${u.deactivated?'opacity:.6;':''}">
+        <div style="width:38px;height:38px;border-radius:50%;background:${avatarBg};display:grid;place-items:center;font-size:.85rem;font-weight:700;color:#fff;flex-shrink:0;">${initials}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;font-size:.88rem;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.first} ${u.last}</div>
+          <div style="font-size:.72rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.email}</div>
+        </div>
+        <span style="font-size:.7rem;padding:3px 9px;border-radius:20px;font-weight:700;background:${roleColor[u.role]||'#888'}22;color:${roleColor[u.role]||'#888'};white-space:nowrap;">${roleIcon[u.role]||''} ${(u.role||'').charAt(0).toUpperCase()+(u.role||'').slice(1)}</span>
+        ${statusBadge}
+        <div style="display:flex;gap:7px;flex-shrink:0;">${actionBtns}</div>
+      </div>`;
     };
 
-    // ── Scope note for managers ──────────────────────────────────────────────
     const scopeNote = isManager
-      ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#C4B5FD;margin-bottom:20px;display:flex;gap:8px;align-items:center;">
-           📊 <span>As <strong>Manager</strong>, you can manage <strong>Staff</strong> and <strong>Rider</strong> accounts only. Admin accounts are managed exclusively by Admins.</span>
-         </div>`
-      : `<div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.18);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#FDBA74;margin-bottom:20px;display:flex;gap:8px;align-items:center;">
-           👑 <span>As <strong>Admin</strong>, you have full access to manage all Manager, Staff, and Rider accounts.</span>
-         </div>`;
+      ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#C4B5FD;margin-bottom:20px;display:flex;gap:8px;align-items:center;">📊 <span>As <strong>Manager</strong>, you can manage <strong>Staff</strong> and <strong>Rider</strong> accounts only.</span></div>`
+      : `<div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.18);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#FDBA74;margin-bottom:20px;display:flex;gap:8px;align-items:center;">👑 <span>As <strong>Admin</strong>, you have full access to manage all Manager, Staff, and Rider accounts.</span></div>`;
 
-    // ── Section builder ──────────────────────────────────────────────────────
-    const section = (title, dotColor, borderColor, items, bucket, emptyMsg) =>
+    const section = (title, dotColor, borderColor, items, bucket) =>
       items.length === 0 ? '' : `
         <div style="margin-bottom:28px;">
           <h3 style="font-size:.78rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:7px;">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};"></span>
-            ${title} (${items.length})
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};"></span>${title} (${items.length})
           </h3>
-          <div style="background:var(--surface);border:1px solid ${borderColor};border-radius:12px;overflow:hidden;">
-            ${items.map(u => userRow(u, bucket)).join('')}
-          </div>
+          <div style="background:var(--surface);border:1px solid ${borderColor};border-radius:12px;overflow:hidden;">${items.map(u=>userRow(u,bucket)).join('')}</div>
         </div>`;
 
-    const isEmpty = pending.length === 0 && active.length === 0 && deactivated.length === 0;
-
+    const isEmpty = !pending.length && !active.length && !deactivated.length;
     pg.innerHTML = `
       <div class="ph"><h1>User Management 👥</h1></div>
       <div style="max-width:900px;">
         ${scopeNote}
-
-        ${section('Pending Approval', '#F59E0B', 'rgba(245,158,11,.25)', pending, 'pending', '')}
-        ${section('Active Users', '#22C55E', 'var(--border)', active, 'active', '')}
-        ${section('Deactivated / Inactive', '#EF4444', 'rgba(239,68,68,.2)', deactivated, 'deactivated', '')}
-
-        ${isEmpty ? `
-          <div class="blank-page">
-            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <h2>No Users Yet</h2>
-            <p>${isManager ? 'Staff and Rider accounts will appear here once they register.' : 'Manager, Staff, and Rider accounts will appear here once they register.'}</p>
-          </div>` : ''}
+        ${section('Pending Approval','#F59E0B','rgba(245,158,11,.25)',pending,'pending')}
+        ${section('Active Users','#22C55E','var(--border)',active,'active')}
+        ${section('Deactivated / Inactive','#EF4444','rgba(239,68,68,.2)',deactivated,'deactivated')}
+        ${isEmpty ? `<div class="blank-page">
+          <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <h2>No Users Yet</h2>
+          <p>${isManager ? 'Staff and Rider accounts will appear here once they register.' : 'Manager, Staff, and Rider accounts will appear here once they register.'}</p>
+        </div>` : ''}
       </div>`;
   }
 
-  // ── Approve (pending → active) ─────────────────────────────────────────────
-  window.approveUser = function(id) {
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-    const u = users.find(x => x.id === id);
-    if (!u) return;
-    if (isManager && !['staff','rider'].includes(u.role)) {
-      showToast('🚫 Managers can only approve Staff and Rider accounts.', 'error'); return;
-    }
-    u.approved    = true;
-    u.deactivated = false;
-    localStorage.setItem('finexy_users', JSON.stringify(users));
-    showToast(`✅ ${u.first} ${u.last} has been approved and can now sign in.`, 'success');
-    buildPage();
+  window.approveUser = async function(id) {
+    try {
+      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
+      const u = rows[0]; if(!u) return;
+      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only approve Staff and Rider accounts.','error'); return; }
+      confirmAction('Approve User', `Approve ${u.first} ${u.last}? They will be able to sign in immediately.`, async () => {
+        await sbQuery('users?id=eq.'+id, { method:'PATCH', body: JSON.stringify({ approved:true, deactivated:false }) });
+        showToast(`✅ ${u.first} ${u.last} approved! They can now sign in.`, 'success');
+        buildPage();
+      });
+    } catch(e) { showToast('Error: '+e.message,'error'); }
   };
 
-  // ── Deactivate (active/pending → deactivated, blocks login) ────────────────
-  window.deactivateUser = function(id) {
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-    const u = users.find(x => x.id === id);
-    if (!u) return;
-    if (isManager && !['staff','rider'].includes(u.role)) {
-      showToast('🚫 Managers can only deactivate Staff and Rider accounts.', 'error'); return;
-    }
-    confirmAction(
-      'Deactivate User',
-      `Deactivate ${u.first} ${u.last} (${u.role})? They will no longer be able to sign in until reactivated.`,
-      () => {
-        u.deactivated = true;
-        u.approved    = false;
-        localStorage.setItem('finexy_users', JSON.stringify(users));
+  window.deactivateUser = async function(id) {
+    try {
+      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
+      const u = rows[0]; if(!u) return;
+      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only deactivate Staff and Rider accounts.','error'); return; }
+      confirmAction('Deactivate User', `Deactivate ${u.first} ${u.last}? They will no longer be able to sign in until reactivated.`, async () => {
+        await sbQuery('users?id=eq.'+id, { method:'PATCH', body: JSON.stringify({ approved:false, deactivated:true }) });
         showToast(`⏸ ${u.first} ${u.last} has been deactivated.`, 'success');
         buildPage();
-      }
-    );
+      });
+    } catch(e) { showToast('Error: '+e.message,'error'); }
   };
 
-  // ── Reactivate (deactivated → active, restores login) ──────────────────────
-  window.reactivateUser = function(id) {
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-    const u = users.find(x => x.id === id);
-    if (!u) return;
-    if (isManager && !['staff','rider'].includes(u.role)) {
-      showToast('🚫 Managers can only reactivate Staff and Rider accounts.', 'error'); return;
-    }
-    confirmAction(
-      'Reactivate User',
-      `Reactivate ${u.first} ${u.last} (${u.role})? Their account access will be fully restored.`,
-      () => {
-        u.deactivated = false;
-        u.approved    = true;
-        localStorage.setItem('finexy_users', JSON.stringify(users));
+  window.reactivateUser = async function(id) {
+    try {
+      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
+      const u = rows[0]; if(!u) return;
+      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only reactivate Staff and Rider accounts.','error'); return; }
+      confirmAction('Reactivate User', `Reactivate ${u.first} ${u.last}? Their account access will be fully restored.`, async () => {
+        await sbQuery('users?id=eq.'+id, { method:'PATCH', body: JSON.stringify({ approved:true, deactivated:false }) });
         showToast(`♻ ${u.first} ${u.last} has been reactivated and can sign in again.`, 'success');
         buildPage();
-      }
-    );
+      });
+    } catch(e) { showToast('Error: '+e.message,'error'); }
   };
 
-  // ── Remove (permanently delete) ────────────────────────────────────────────
-  window.removeUser = function(id) {
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-    const u = users.find(x => x.id === id);
-    if (!u) return;
-    if (isManager && !['staff','rider'].includes(u.role)) {
-      showToast('🚫 Managers can only remove Staff and Rider accounts.', 'error'); return;
-    }
-    confirmAction(
-      'Remove User',
-      `Permanently remove ${u.first} ${u.last} (${u.role})? This cannot be undone.`,
-      () => {
-        const updated = users.filter(x => x.id !== id);
-        localStorage.setItem('finexy_users', JSON.stringify(updated));
+  window.removeUser = async function(id) {
+    try {
+      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
+      const u = rows[0]; if(!u) return;
+      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only remove Staff and Rider accounts.','error'); return; }
+      confirmAction('Remove User', `Permanently remove ${u.first} ${u.last} (${u.role})? This cannot be undone.`, async () => {
+        await sbQuery('users?id=eq.'+id, { method:'DELETE', prefer:'return=minimal' });
         showToast(`🗑 ${u.first} ${u.last} has been permanently removed.`, 'success');
         buildPage();
-      }
-    );
+      });
+    } catch(e) { showToast('Error: '+e.message,'error'); }
   };
 
   buildPage();
@@ -580,10 +552,9 @@ function renderRiderDeliveriesPage() {
   buildDeliveries();
 }
 
-window.saveSettings = function() {
+window.saveSettings = async function() {
   if (!CURRENT_USER) return;
 
-  // Update name / business in session + localStorage users list
   const newName = document.getElementById('settingName').value.trim();
   const newBiz  = document.getElementById('settingBusiness').value.trim();
   const sel     = document.getElementById('settingCurrency');
@@ -592,25 +563,19 @@ window.saveSettings = function() {
   if (newName) {
     CURRENT_USER.name     = newName;
     CURRENT_USER.business = newBiz || CURRENT_USER.business;
-    // split name back to first/last for users db
     const parts = newName.split(' ');
     const first = parts[0] || '';
     const last  = parts.slice(1).join(' ') || '';
     CURRENT_USER.initials = ((first[0]||'') + (last[0]||'')).toUpperCase() || '?';
-
     sessionStorage.setItem('finexy_session', JSON.stringify(CURRENT_USER));
 
-    // Update in users DB
-    const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-    const idx   = users.findIndex(u => u.id === CURRENT_USER.userId);
-    if (idx !== -1) {
-      users[idx].first    = first;
-      users[idx].last     = last;
-      users[idx].business = CURRENT_USER.business;
-      localStorage.setItem('finexy_users', JSON.stringify(users));
-    }
+    try {
+      await sbQuery('users?id=eq.'+CURRENT_USER.userId, {
+        method: 'PATCH',
+        body: JSON.stringify({ first, last, business: CURRENT_USER.business }),
+      });
+    } catch(e) { console.warn('Could not update user in Supabase:', e); }
 
-    // Refresh topbar
     const avatarEl   = document.getElementById('topAvatar');
     const nameEl     = document.getElementById('topName');
     const businessEl = document.getElementById('topBusiness');
@@ -619,7 +584,6 @@ window.saveSettings = function() {
     if (businessEl) businessEl.textContent = CURRENT_USER.business;
   }
 
-  // Save currency per-user
   currencySymbol = newCur;
   localStorage.setItem('finexy_currency_' + CURRENT_USER.userId, newCur);
   saveToStorage();
@@ -632,7 +596,7 @@ window.saveSettings = function() {
 /* ══════════════════════
    CHANGE PASSWORD
 ══════════════════════ */
-window.changePassword = function() {
+window.changePassword = async function() {
   if (!CURRENT_USER) return;
   const current = document.getElementById('pwCurrent').value;
   const newPw   = document.getElementById('pwNew').value;
@@ -642,17 +606,21 @@ window.changePassword = function() {
   if (newPw.length < 6)              { showToast('New password must be at least 6 characters.', 'error'); return; }
   if (newPw !== confirm)             { showToast('New passwords do not match.', 'error'); return; }
 
-  const users = JSON.parse(localStorage.getItem('finexy_users') || '[]');
-  const user  = users.find(u => u.id === CURRENT_USER.userId);
-  if (!user)                          { showToast('User not found.', 'error'); return; }
-  if (user.password !== current)      { showToast('Current password is incorrect.', 'error'); return; }
+  try {
+    const rows = await sbQuery('users?id=eq.'+CURRENT_USER.userId+'&select=password');
+    const user = rows[0];
+    if (!user)                  { showToast('User not found.', 'error'); return; }
+    if (user.password !== current) { showToast('Current password is incorrect.', 'error'); return; }
 
-  user.password = newPw;
-  localStorage.setItem('finexy_users', JSON.stringify(users));
-  document.getElementById('pwCurrent').value = '';
-  document.getElementById('pwNew').value     = '';
-  document.getElementById('pwConfirm').value = '';
-  showToast('Password updated successfully!', 'success');
+    await sbQuery('users?id=eq.'+CURRENT_USER.userId, {
+      method: 'PATCH',
+      body: JSON.stringify({ password: newPw }),
+    });
+    document.getElementById('pwCurrent').value = '';
+    document.getElementById('pwNew').value     = '';
+    document.getElementById('pwConfirm').value = '';
+    showToast('Password updated successfully!', 'success');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 };
 
 /* ══════════════════════
