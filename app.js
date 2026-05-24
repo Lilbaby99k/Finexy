@@ -644,22 +644,92 @@ const S = {
    BOOT
 ══════════════════════ */
 document.addEventListener('DOMContentLoaded', async () => {
-  await initSession();        // load session + apply RBAC to sidebar
+  await initSession();
   loadFromStorage();
+  await loadInventoryFromSupabase();
+  await loadOrdersFromSupabase();
   initSidebar();
   initTopbar();
   initNotifs();
   initOrdersSection();
   initInventorySection();
   initModals();
-  applyRBACtoButtons();       // final pass: disable any remaining restricted buttons
+  applyRBACtoButtons();
   refreshDashboardKPIs();
   renderOrdersTable();
   renderInvTable();
   renderStockAlertBanner();
-  // Load inventory from Supabase so all platforms are in sync
-  loadInventoryFromSupabase();
+  // Poll for new store orders every 30 seconds
+  setInterval(async () => {
+    await loadOrdersFromSupabase();
+    renderOrdersTable();
+    refreshDashboardKPIs();
+  }, 30000);
 });
+
+async function loadOrdersFromSupabase() {
+  try {
+    const rows = await sbQuery('orders?select=*&order=created_at.desc');
+    // Map Supabase orders → admin panel format
+    const mapped = rows.map(r => ({
+      id:             r.order_id || ('#STO-' + r.id),
+      date:           r.date || r.created_at?.slice(0,10),
+      customer:       r.customer,
+      phone:          r.phone || '',
+      email:          r.email || '',
+      address:        r.address || '',
+      notes:          r.notes || '',
+      category:       r.items_summary || '',
+      items:          r.items_count   || 1,
+      total:          parseFloat(r.total) || 0,
+      status:         r.status || 'pending',
+      payment_method: r.payment_method || '',
+      _fromStore:     true,
+      _supaId:        r.id,
+    }));
+
+    // Merge: keep locally-created orders + add store orders not already in ORDERS_DB
+    const existingIds = new Set(ORDERS_DB.map(o => o.id));
+    mapped.forEach(o => {
+      if (!existingIds.has(o.id)) {
+        ORDERS_DB.push(o);
+        // Notify admin of new store order
+        if (o._fromStore) pushNotif(`🛒 New store order ${o.id} from ${o.customer} — ₦${o.total.toLocaleString()}`);
+      } else {
+        // Update status if changed
+        const existing = ORDERS_DB.find(x => x.id === o.id);
+        if (existing) existing.status = o.status;
+      }
+    });
+
+    saveToStorage();
+  } catch(e) {
+    console.warn('Could not load orders from Supabase:', e);
+  }
+}
+
+async function loadInventoryFromSupabase() {
+  try {
+    const rows = await sbQuery('inventory?select=*&order=created_at.asc');
+    INV_DB = rows.map(r => ({
+      id:       r.id,
+      sku:      r.sku,
+      name:     r.name,
+      category: r.category,
+      price:    parseFloat(r.price) || 0,
+      qty:      parseInt(r.qty)     || 0,
+      lowAt:    parseInt(r.low_at)  || 5,
+      desc:     r.description       || '',
+      image:    r.image             || null,
+      updated:  r.updated           || todayStr(),
+    }));
+    // Sync SKU counter
+    const nums = INV_DB.map(p => parseInt(p.sku.replace('SKU-',''))||0);
+    if (nums.length) nextSkuNum = Math.max(...nums) + 1;
+  } catch(e) {
+    console.warn('Could not load inventory from Supabase:', e);
+  }
+}
 
 /* ══════════════════════
    LOCAL STORAGE
@@ -681,7 +751,7 @@ function saveToStorage() {
   try {
     localStorage.setItem(userKey('orders'),   JSON.stringify(ORDERS_DB));
     localStorage.setItem(userKey('orderNum'), nextOrderNum);
-    // Inventory cache kept locally for cross-tab sync signal only
+    // Inventory is shared — NOT scoped to a single user
     localStorage.setItem(SHARED_INV_KEY,  JSON.stringify(INV_DB));
     localStorage.setItem(SHARED_SKU_KEY,  nextSkuNum);
   } catch(e) {}
@@ -689,111 +759,16 @@ function saveToStorage() {
 function loadFromStorage() {
   try {
     const o  = localStorage.getItem(userKey('orders'));
+    const i  = localStorage.getItem(SHARED_INV_KEY);          // shared
     const on = localStorage.getItem(userKey('orderNum'));
-    const sn = localStorage.getItem(SHARED_SKU_KEY);
+    const sn = localStorage.getItem(SHARED_SKU_KEY);          // shared
     const cy = localStorage.getItem(CURRENT_USER ? 'finexy_currency_' + CURRENT_USER.userId : 'finexy_currency');
-    if (o)  ORDERS_DB    = JSON.parse(o);
-    if (on) nextOrderNum = parseInt(on);
-    if (sn) nextSkuNum   = parseInt(sn);
+    if (o)  ORDERS_DB      = JSON.parse(o);
+    if (i)  INV_DB         = JSON.parse(i);
+    if (on) nextOrderNum   = parseInt(on);
+    if (sn) nextSkuNum     = parseInt(sn);
     if (cy) currencySymbol = cy;
-    // Always load inventory fresh from Supabase on boot
   } catch(e) {}
-}
-
-/* ══════════════════════════════════════
-   SUPABASE INVENTORY SYNC
-   All add / edit / delete / restock ops
-   write to Supabase so every device and
-   platform sees the same stock in real-time.
-══════════════════════════════════════ */
-
-/** Map local product object → Supabase column names */
-function toSupaRow(p) {
-  return {
-    sku:         p.sku,
-    name:        p.name,
-    category:    p.category,
-    price:       p.price,
-    qty:         p.qty,
-    low_at:      p.lowAt,
-    description: p.desc   || null,
-    image:       p.image  || null,
-    updated:     p.updated || todayStr(),
-  };
-}
-
-/** Map Supabase row → local product object */
-function fromSupaRow(r) {
-  return {
-    sku:      r.sku,
-    name:     r.name,
-    category: r.category,
-    price:    parseFloat(r.price),
-    qty:      parseInt(r.qty),
-    lowAt:    parseInt(r.low_at),
-    desc:     r.description || '',
-    image:    r.image       || null,
-    updated:  r.updated     || todayStr(),
-  };
-}
-
-/** Load ALL inventory rows from Supabase into INV_DB */
-async function loadInventoryFromSupabase() {
-  try {
-    const rows = await sbQuery('inventory?select=*&order=created_at.asc');
-    INV_DB = rows.map(fromSupaRow);
-    // Bump local SKU counter so auto-generated SKUs never collide
-    const nums = INV_DB.map(p => {
-      const m = p.sku.match(/(\d+)$/);
-      return m ? parseInt(m[1]) : 0;
-    });
-    if (nums.length) nextSkuNum = Math.max(nextSkuNum, Math.max(...nums) + 1);
-    // Sync cache for cross-tab listener
-    localStorage.setItem(SHARED_INV_KEY, JSON.stringify(INV_DB));
-    applyInvFilters();
-    renderStockAlertBanner();
-    renderInvKPIs();
-    refreshDashboardKPIs();
-  } catch(e) {
-    // Fall back to local cache if Supabase is unreachable
-    const i = localStorage.getItem(SHARED_INV_KEY);
-    if (i) { try { INV_DB = JSON.parse(i); } catch(_){} }
-    console.warn('Could not load inventory from Supabase, using local cache:', e);
-  }
-}
-
-/** Insert a new product row in Supabase */
-async function sbAddProduct(p) {
-  await sbQuery('inventory', {
-    method: 'POST',
-    body: JSON.stringify(toSupaRow(p)),
-  });
-  // Update local cache / cross-tab signal
-  saveToStorage();
-}
-
-/** Update an existing product row in Supabase by SKU */
-async function sbUpdateProduct(p) {
-  await sbQuery('inventory?sku=eq.' + encodeURIComponent(p.sku), {
-    method: 'PATCH',
-    body: JSON.stringify(toSupaRow(p)),
-  });
-  saveToStorage();
-}
-
-/** Delete a product row from Supabase by SKU */
-async function sbDeleteProduct(sku) {
-  await sbQuery('inventory?sku=eq.' + encodeURIComponent(sku), { method: 'DELETE' });
-  saveToStorage();
-}
-
-/** Update only the qty (and updated date) of a product in Supabase */
-async function sbPatchQty(sku, qty) {
-  await sbQuery('inventory?sku=eq.' + encodeURIComponent(sku), {
-    method: 'PATCH',
-    body: JSON.stringify({ qty, updated: todayStr() }),
-  });
-  saveToStorage();
 }
 
 /* ── Cross-tab inventory sync ──
@@ -1054,11 +1029,20 @@ function renderOrdersTable() {
   tbody.innerHTML = rows.map(o => `
     <tr class="${S.orderSelected.has(o.id) ? 'row-selected' : ''}">
       <td><input type="checkbox" class="o-chk" data-id="${o.id}" ${S.orderSelected.has(o.id)?'checked':''}/></td>
-      <td style="font-weight:700">${o.id}</td>
+      <td style="font-weight:700;color:var(--brand);">
+        ${o.id}
+        ${o._fromStore ? `<span style="font-size:.58rem;background:#059669;color:#fff;padding:1px 5px;border-radius:4px;display:inline-block;margin-left:4px;vertical-align:middle;">STORE</span>` : ''}
+      </td>
       <td>${fmtDate(o.date)}</td>
-      <td>${o.customer}</td>
-      <td>${o.category}</td>
-      <td><span class="badge ${o.status}">${cap(o.status)}</span></td>
+      <td>
+        <div style="font-weight:600;font-size:.84rem;">${o.customer}</div>
+        ${o.phone ? `<div style="font-size:.7rem;color:var(--t2);">${o.phone}</div>` : ''}
+      </td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;" title="${o.category}">${o.category}</td>
+      <td>
+        <span class="badge ${o.status}">${cap(o.status)}</span>
+        ${o.payment_method ? `<div style="font-size:.65rem;color:var(--t2);margin-top:3px;">${o.payment_method}</div>` : ''}
+      </td>
       <td>${o.items} item${o.items !== 1 ? 's':''}</td>
       <td style="font-weight:700">${sym}${o.total.toFixed(2)}</td>
       <td><div class="row-acts">
@@ -1202,16 +1186,14 @@ function deductInventoryForOrder(order) {
   applyInvFilters();
   renderStockAlertBanner();
   refreshDashboardKPIs();
+  // Sync qty deduction to Supabase
+  sbQuery('inventory?sku=eq.'+encodeURIComponent(matched.sku), { method:'PATCH', body: JSON.stringify({ qty:matched.qty, updated:matched.updated }) }).catch(()=>{});
 
   const st = stockStatus(matched);
   if (st === 'low_stock')    pushNotif(`⚠️ ${matched.name} is running low (${matched.qty} left) after order ${order.id}.`);
   if (st === 'out_of_stock') pushNotif(`🚨 ${matched.name} is now OUT OF STOCK after order ${order.id}.`);
 
   showToast(`📦 Stock updated: "${matched.name}" ${before} → ${matched.qty} units.`, 'success');
-
-  // Sync deducted qty to Supabase so all platforms reflect the sale
-  sbPatchQty(matched.sku, matched.qty).catch(e => console.warn('Stock deduction sync failed:', e));
-
   return true;
 }
 window.deductInventoryForOrder = deductInventoryForOrder;
@@ -1254,17 +1236,22 @@ function openOrderView(o) {
   const sym = currencySymbol;
   openModal(`Order ${o.id}`, `
     <div class="detail-grid">
-      <div class="di"><label>Order ID</label><span>${o.id}</span></div>
+      <div class="di"><label>Order ID</label><span style="font-weight:700;color:var(--brand)">${o.id}${o._fromStore ? ' <span style="font-size:.65rem;background:#059669;color:#fff;padding:2px 6px;border-radius:4px;">STORE ORDER</span>' : ''}</span></div>
       <div class="di"><label>Date</label><span>${fmtDate(o.date)}</span></div>
       <div class="di"><label>Customer</label><span>${o.customer}</span></div>
-      <div class="di"><label>Category</label><span>${o.category}</span></div>
+      ${o.phone ? `<div class="di"><label>Phone</label><span>${o.phone}</span></div>` : ''}
+      ${o.email ? `<div class="di"><label>Email</label><span>${o.email}</span></div>` : ''}
+      ${o.address ? `<div class="di" style="grid-column:1/-1"><label>Delivery Address</label><span>${o.address}</span></div>` : ''}
+      <div class="di" style="grid-column:1/-1"><label>Items</label><span>${o.category}</span></div>
+      <div class="di"><label>Qty</label><span>${o.items} item${o.items!==1?'s':''}</span></div>
+      <div class="di"><label>Payment</label><span>${o.payment_method || '—'}</span></div>
       <div class="di"><label>Status</label><span><span class="badge ${o.status}">${cap(o.status)}</span></span></div>
-      <div class="di"><label>Items</label><span>${o.items} item${o.items!==1?'s':''}</span></div>
       <div class="di"><label>Total</label><span style="color:var(--brand);font-size:1.1rem;font-weight:800">${sym}${o.total.toFixed(2)}</span></div>
+      ${o.notes ? `<div class="di" style="grid-column:1/-1"><label>Notes</label><span style="color:var(--t2);font-style:italic">${o.notes}</span></div>` : ''}
     </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Close</button>
-      <button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">Edit</button>
+      <button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">Edit Status</button>
     </div>`);
 }
 
@@ -1300,7 +1287,7 @@ function openOrderEdit(o) {
     </div>`);
 }
 window.openOrderEdit = openOrderEdit;
-window.saveOrderEdit = function(id) {
+window.saveOrderEdit = async function(id) {
   const o = ORDERS_DB.find(x => x.id === id);
   if (!o) return;
   const prevStatus = o.status;
@@ -1310,10 +1297,20 @@ window.saveOrderEdit = function(id) {
   o.status   = document.getElementById('est').value;
   o.items    = parseInt(document.getElementById('eit').value)   || o.items;
   o.total    = parseFloat(document.getElementById('etot').value) || o.total;
+
+  // Sync status change to Supabase for store orders
+  if (o._supaId) {
+    try {
+      await sbQuery('orders?id=eq.'+o._supaId, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: o.status }),
+      });
+    } catch(e) { console.warn('Could not sync order status:', e); }
+  }
+
   saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
   showToast(`Order ${id} updated!`, 'success');
 
-  // Deduct inventory when status transitions to "completed" (i.e. customer paid)
   if (prevStatus !== 'completed' && o.status === 'completed') {
     const didDeduct = deductInventoryForOrder(o);
     if (!didDeduct) {
@@ -1350,24 +1347,20 @@ function initInventorySection() {
     S.invFiltered.forEach(p => e.target.checked ? S.invSelected.add(p.sku) : S.invSelected.delete(p.sku));
     renderInvTable();
   });
-  document.getElementById('bulkRestockBtn').addEventListener('click', async () => {
+  document.getElementById('bulkRestockBtn').addEventListener('click', () => {
     if (!can('restockProduct')) { denied('Bulk Restock'); return; }
     if (!S.invSelected.size) return;
     confirmAction('Restock Selected', `Add 50 units to all ${S.invSelected.size} selected product(s)?`, async () => {
       const skus = [...S.invSelected];
-      skus.forEach(sku => {
+      await Promise.all(skus.map(async sku => {
         const p = INV_DB.find(x => x.sku === sku);
-        if (p) { p.qty += 50; p.updated = todayStr(); }
-      });
+        if (!p) return;
+        p.qty += 50; p.updated = todayStr();
+        try { await sbQuery('inventory?sku=eq.'+encodeURIComponent(sku), { method:'PATCH', body: JSON.stringify({ qty:p.qty, updated:p.updated }) }); } catch(e){}
+      }));
       S.invSelected.clear();
-      applyInvFilters(); renderStockAlertBanner();
+      saveToStorage(); applyInvFilters(); renderStockAlertBanner();
       showToast('Selected products restocked (+50 each)!', 'success');
-      // Sync each updated qty to Supabase
-      for (const sku of skus) {
-        const p = INV_DB.find(x => x.sku === sku);
-        if (p) { try { await sbPatchQty(sku, p.qty); } catch(e) { console.warn('Bulk restock sync failed for', sku, e); } }
-      }
-      saveToStorage();
     });
   });
   document.getElementById('bulkDeleteBtn').addEventListener('click', () => {
@@ -1375,15 +1368,13 @@ function initInventorySection() {
     if (!S.invSelected.size) return;
     confirmAction('Delete Products', `Delete ${S.invSelected.size} selected product(s)? This cannot be undone.`, async () => {
       const skus = [...S.invSelected];
-      skus.forEach(sku => { const i = INV_DB.findIndex(x => x.sku === sku); if (i !== -1) INV_DB.splice(i, 1); });
+      await Promise.all(skus.map(async sku => {
+        try { await sbQuery('inventory?sku=eq.'+encodeURIComponent(sku), { method:'DELETE' }); } catch(e){}
+        const i = INV_DB.findIndex(x => x.sku === sku); if (i !== -1) INV_DB.splice(i, 1);
+      }));
       S.invSelected.clear();
-      applyInvFilters(); renderStockAlertBanner();
+      saveToStorage(); applyInvFilters(); renderStockAlertBanner();
       showToast('Selected products deleted.', 'warning');
-      // Remove each from Supabase
-      for (const sku of skus) {
-        try { await sbDeleteProduct(sku); } catch(e) { console.warn('Bulk delete sync failed for', sku, e); }
-      }
-      saveToStorage();
     });
   });
   applyInvFilters();
@@ -1487,12 +1478,14 @@ function renderInvTable() {
       if (!can('editProduct')) { denied('Adjust Qty'); return; }
       const p = INV_DB.find(x => x.sku === btn.dataset.sku);
       if (!p) return;
-      const newQty = Math.max(0, p.qty + parseInt(btn.dataset.dir));
-      p.qty = newQty; p.updated = todayStr();
-      applyInvFilters(); renderStockAlertBanner();
-      if (stockStatus(p) === 'low_stock')    pushNotif(`⚠️ ${p.name} is running low (${p.qty} left).`);
-      if (stockStatus(p) === 'out_of_stock') pushNotif(`🚨 ${p.name} is now OUT OF STOCK.`);
-      try { await sbPatchQty(p.sku, p.qty); } catch(e) { console.warn('Qty sync failed:', e); }
+      p.qty = Math.max(0, p.qty + parseInt(btn.dataset.dir));
+      p.updated = todayStr();
+      try {
+        await sbQuery('inventory?sku=eq.'+encodeURIComponent(p.sku), { method:'PATCH', body: JSON.stringify({ qty:p.qty, updated:p.updated }) });
+        saveToStorage(); applyInvFilters(); renderStockAlertBanner();
+        if (stockStatus(p) === 'low_stock')    pushNotif(`⚠️ ${p.name} is running low (${p.qty} left).`);
+        if (stockStatus(p) === 'out_of_stock') pushNotif(`🚨 ${p.name} is now OUT OF STOCK.`);
+      } catch(e) { showToast('Error updating qty: ' + e.message, 'error'); }
     });
   });
 
@@ -1503,9 +1496,11 @@ function renderInvTable() {
       if (!p) return;
       p.qty = Math.max(0, parseInt(e.target.value) || 0);
       p.updated = todayStr();
-      applyInvFilters(); renderStockAlertBanner();
-      showToast(`${p.name} — qty updated to ${p.qty}`, 'success');
-      try { await sbPatchQty(p.sku, p.qty); } catch(e) { console.warn('Qty sync failed:', e); }
+      try {
+        await sbQuery('inventory?sku=eq.'+encodeURIComponent(p.sku), { method:'PATCH', body: JSON.stringify({ qty:p.qty, updated:p.updated }) });
+        saveToStorage(); applyInvFilters(); renderStockAlertBanner();
+        showToast(`${p.name} — qty updated to ${p.qty}`, 'success');
+      } catch(e) { showToast('Error updating qty: ' + e.message, 'error'); }
     });
   });
 
@@ -1521,17 +1516,13 @@ function renderInvTable() {
       if (btn.dataset.act === 'del') {
         if (!can('deleteProduct')) { denied('Delete Product'); return; }
         confirmAction('Delete Product', `Delete "${p.name}" permanently?`, async () => {
-          const delSku = p.sku;
-          INV_DB.splice(INV_DB.findIndex(x => x.sku === delSku), 1);
-          S.invSelected.delete(delSku);
-          applyInvFilters(); renderStockAlertBanner();
-          showToast(`"${p.name}" deleted.`, 'warning');
-          // Remove from Supabase so all platforms reflect deletion
           try {
-            await sbDeleteProduct(delSku);
-          } catch(e) {
-            showToast(`Deleted locally but sync failed: ${e.message}`, 'warning');
-          }
+            await sbQuery('inventory?sku=eq.'+encodeURIComponent(p.sku), { method:'DELETE' });
+            INV_DB.splice(INV_DB.findIndex(x => x.sku === p.sku), 1);
+            S.invSelected.delete(p.sku);
+            saveToStorage(); applyInvFilters(); renderStockAlertBanner();
+            showToast(`"${p.name}" deleted.`, 'warning');
+          } catch(e) { showToast('Error deleting product: ' + e.message, 'error'); }
         });
       }
     });
@@ -1629,17 +1620,17 @@ window.saveNewProduct = async function() {
   }
   const sku = 'SKU-' + String(nextSkuNum).padStart(3, '0');
   nextSkuNum++;
-  const product = { sku, name, category:cat, price, qty, lowAt, desc, image: window._prodImgData || null, updated: todayStr() };
-  INV_DB.push(product);
-  window._prodImgData = null;
-  closeModal(); applyInvFilters(); renderStockAlertBanner();
-  showToast(`"${name}" added to inventory!`, 'success');
-  pushNotif(`New product "${name}" added to inventory.`);
-  // Persist to Supabase so all platforms update
+  const newProduct = { sku, name, category:cat, price, qty, low_at:lowAt, description:desc, image: window._prodImgData || null, updated: todayStr() };
   try {
-    await sbAddProduct(product);
+    const rows = await sbQuery('inventory', { method:'POST', body: JSON.stringify(newProduct) });
+    const saved = rows[0];
+    INV_DB.push({ id:saved.id, sku, name, category:cat, price, qty, lowAt, desc, image: window._prodImgData||null, updated: todayStr() });
+    window._prodImgData = null;
+    saveToStorage(); closeModal(); applyInvFilters(); renderStockAlertBanner();
+    showToast(`"${name}" added to inventory!`, 'success');
+    pushNotif(`New product "${name}" added to inventory.`);
   } catch(e) {
-    showToast(`"${name}" saved locally but failed to sync: ${e.message}`, 'warning');
+    showToast('Error saving product: ' + e.message, 'error');
   }
 };
 
@@ -1737,23 +1728,23 @@ window.openProductEdit = openProductEdit;
 window.saveProductEdit = async function(sku) {
   const p = INV_DB.find(x => x.sku === sku);
   if (!p) return;
-  p.name     = document.getElementById('en').value.trim()   || p.name;
+  p.name     = document.getElementById('en').value.trim()      || p.name;
   p.category = document.getElementById('ec2').value;
   p.price    = parseFloat(document.getElementById('ep').value) || p.price;
-  p.qty      = parseInt(document.getElementById('eq').value) ?? p.qty;
-  p.lowAt    = parseInt(document.getElementById('ela').value) || p.lowAt;
+  p.qty      = parseInt(document.getElementById('eq').value)   ?? p.qty;
+  p.lowAt    = parseInt(document.getElementById('ela').value)  || p.lowAt;
   p.desc     = document.getElementById('edesc').value.trim();
   p.image    = window._editImgData;
   p.updated  = todayStr();
   window._editImgData = null;
-  closeModal(); applyInvFilters(); renderStockAlertBanner();
-  showToast(`"${p.name}" updated!`, 'success');
-  // Sync to Supabase so all platforms see the change
   try {
-    await sbUpdateProduct(p);
-  } catch(e) {
-    showToast(`Saved locally but sync failed: ${e.message}`, 'warning');
-  }
+    await sbQuery('inventory?sku=eq.'+encodeURIComponent(sku), {
+      method: 'PATCH',
+      body: JSON.stringify({ name:p.name, category:p.category, price:p.price, qty:p.qty, low_at:p.lowAt, description:p.desc, image:p.image, updated:p.updated }),
+    });
+    saveToStorage(); closeModal(); applyInvFilters(); renderStockAlertBanner();
+    showToast(`"${p.name}" updated!`, 'success');
+  } catch(e) { showToast('Error updating product: ' + e.message, 'error'); }
 };
 
 /* ── Restock ── */
@@ -1778,15 +1769,15 @@ window.doRestock = async function(sku) {
   const add = parseInt(document.getElementById('radd').value);
   if (!p || !add || add < 1) { showToast('Enter a valid quantity.', 'error'); return; }
   p.qty += add; p.updated = todayStr();
-  closeModal(); applyInvFilters(); renderStockAlertBanner();
-  showToast(`${p.name}: +${add} units. New stock: ${p.qty}`, 'success');
-  pushNotif(`${p.name} restocked. +${add} units → ${p.qty} total.`);
-  // Sync qty to Supabase so all platforms see updated stock
   try {
-    await sbPatchQty(sku, p.qty);
-  } catch(e) {
-    showToast(`Restock saved locally but sync failed: ${e.message}`, 'warning');
-  }
+    await sbQuery('inventory?sku=eq.'+encodeURIComponent(sku), {
+      method: 'PATCH',
+      body: JSON.stringify({ qty: p.qty, updated: p.updated }),
+    });
+    saveToStorage(); closeModal(); applyInvFilters(); renderStockAlertBanner();
+    showToast(`${p.name}: +${add} units. New stock: ${p.qty}`, 'success');
+    pushNotif(`${p.name} restocked. +${add} units → ${p.qty} total.`);
+  } catch(e) { showToast('Error restocking: ' + e.message, 'error'); }
 };
 
 /* ── Export CSV ── */
