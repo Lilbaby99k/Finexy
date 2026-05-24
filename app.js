@@ -38,21 +38,21 @@ const PERMISSIONS = {
     viewInventory:true, addProduct:true, editProduct:true, deleteProduct:true,
     restockProduct:true, exportCSV:true, viewAnalytics:true, viewCustomers:true,
     viewSettings:true, viewDiscounts:true, viewStore:true, viewHelpdesk:true,
-    viewUserManagement:true, approveUsers:true, removeUsers:true,
+    viewUserManagement:true, approveUsers:true, removeUsers:true, assignRider:true,
   },
   manager: {
     viewDashboard:true, addOrder:true, editOrder:true, deleteOrder:false,
     viewInventory:true, addProduct:true, editProduct:true, deleteProduct:false,
     restockProduct:true, exportCSV:true, viewAnalytics:true, viewCustomers:true,
     viewSettings:false, viewDiscounts:true, viewStore:true, viewHelpdesk:true,
-    viewUserManagement:true, approveUsers:true, removeUsers:true,
+    viewUserManagement:true, approveUsers:true, removeUsers:true, assignRider:true,
   },
   staff: {
     viewDashboard:true, addOrder:true, editOrder:false, deleteOrder:false,
     viewInventory:true, addProduct:false, editProduct:false, deleteProduct:false,
     restockProduct:false, exportCSV:false, viewAnalytics:false, viewCustomers:false,
     viewSettings:false, viewDiscounts:false, viewStore:false, viewHelpdesk:true,
-    viewUserManagement:false, approveUsers:false, removeUsers:false,
+    viewUserManagement:false, approveUsers:false, removeUsers:false, assignRider:true,
   },
   rider: {
     viewDashboard:true, addOrder:false, editOrder:false, deleteOrder:false,
@@ -60,7 +60,7 @@ const PERMISSIONS = {
     restockProduct:false, exportCSV:false, viewAnalytics:false, viewCustomers:false,
     viewSettings:false, viewDiscounts:false, viewStore:false, viewHelpdesk:true,
     viewDeliveries:true, updateDeliveryStatus:true,
-    viewUserManagement:false, approveUsers:false, removeUsers:false,
+    viewUserManagement:false, approveUsers:false, removeUsers:false, assignRider:false,
   },
 };
 
@@ -1047,6 +1047,7 @@ function renderOrdersTable() {
       <td style="font-weight:700">${sym}${o.total.toFixed(2)}</td>
       <td><div class="row-acts">
         <button class="ra" data-act="view"  data-id="${o.id}" title="View">👁</button>
+        ${can('assignRider') ? `<button class="ra" data-act="assign" data-id="${o.id}" title="Assign Rider" style="color:#059669;">🛵</button>` : ''}
         ${canEdit   ? `<button class="ra" data-act="edit" data-id="${o.id}" title="Edit">✏️</button>` : `<button class="ra" style="opacity:.3;cursor:not-allowed" title="Edit not allowed for your role" disabled>✏️</button>`}
         ${canDelete ? `<button class="ra red" data-act="del" data-id="${o.id}" title="Delete">🗑</button>` : `<button class="ra" style="opacity:.3;cursor:not-allowed" title="Delete not allowed for your role" disabled>🗑</button>`}
       </div></td>
@@ -1065,6 +1066,10 @@ function renderOrdersTable() {
       const o = ORDERS_DB.find(x => x.id === btn.dataset.id);
       if (!o) return;
       if (btn.dataset.act === 'view') { openOrderView(o); return; }
+      if (btn.dataset.act === 'assign') {
+        if (!can('assignRider')) { denied('Assign Rider'); return; }
+        openAssignRider(o.id); return;
+      }
       if (btn.dataset.act === 'edit') {
         if (!can('editOrder')) { denied('Edit Order'); return; }
         openOrderEdit(o); return;
@@ -1251,6 +1256,7 @@ function openOrderView(o) {
     </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Close</button>
+      ${can('assignRider') ? `<button class="btn-outline" onclick="closeModal();openAssignRider('${o.id}')">🛵 Assign Rider</button>` : ''}
       <button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">Edit Status</button>
     </div>`);
 }
@@ -1318,6 +1324,121 @@ window.saveOrderEdit = async function(id) {
     }
     pushNotif(`Order ${id} completed — payment received from ${o.customer}.`);
   }
+};
+
+/* ══════════════════════
+   ASSIGN RIDER
+══════════════════════ */
+window.openAssignRider = async function(orderId) {
+  const o = ORDERS_DB.find(x => x.id === orderId);
+  if (!o) return;
+
+  // Load available (active, approved) riders from Supabase
+  let riders = [];
+  try {
+    riders = await sbQuery('users?role=eq.rider&approved=eq.true&deactivated=eq.false&select=id,first,last,email');
+  } catch(e) {
+    showToast('Could not load riders. Check connection.', 'error'); return;
+  }
+
+  if (riders.length === 0) {
+    openModal('Assign Rider 🛵', `
+      <div style="text-align:center;padding:24px 0;">
+        <div style="font-size:2.5rem;margin-bottom:12px;">🛵</div>
+        <p style="color:var(--t2);font-size:.88rem;">No approved riders available yet.<br/>Add and approve a Rider account first.</p>
+      </div>
+      <div class="modal-actions"><button class="btn-ghost" onclick="closeModal()">Close</button></div>`);
+    return;
+  }
+
+  const currentRider = o.rider_name || null;
+
+  openModal('Assign Rider 🛵', `
+    <div style="margin-bottom:16px;">
+      <p style="font-size:.82rem;color:var(--t2);margin-bottom:4px;">Order: <strong style="color:var(--t1);">${o.id}</strong></p>
+      <p style="font-size:.82rem;color:var(--t2);margin-bottom:${currentRider?'8px':'0'};">Customer: <strong style="color:var(--t1);">${o.customer}</strong></p>
+      ${currentRider ? `<div style="font-size:.78rem;color:#86EFAC;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:8px 12px;">Currently assigned to: <strong>${currentRider}</strong></div>` : ''}
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:.78rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:10px;">Select Rider</label>
+      <div style="display:flex;flex-direction:column;gap:8px;" id="riderList">
+        ${riders.map(r => `
+          <label style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;transition:border-color .15s;" id="riderOpt_${r.id}" onclick="selectRiderOpt(${r.id})">
+            <input type="radio" name="riderSel" value="${r.id}" style="display:none;" ${o.rider_id==r.id?'checked':''} />
+            <div style="width:36px;height:36px;border-radius:50%;background:#059669;display:grid;place-items:center;font-size:.8rem;font-weight:700;color:#fff;flex-shrink:0;">${(r.first[0]+(r.last?.[0]||'')).toUpperCase()}</div>
+            <div style="flex:1;">
+              <div style="font-weight:600;font-size:.85rem;color:var(--t1);">${r.first} ${r.last}</div>
+              <div style="font-size:.72rem;color:var(--t2);">${r.email}</div>
+            </div>
+            <div id="riderCheck_${r.id}" style="width:18px;height:18px;border-radius:50%;background:${o.rider_id==r.id?'#059669':'var(--border)'};display:grid;place-items:center;flex-shrink:0;">
+              ${o.rider_id==r.id?'<svg width="9" height="9" viewBox="0 0 9 9"><path d="M1.5 4.5l2 2L7.5 2" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>':''}
+            </div>
+          </label>`).join('')}
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="confirmAssignRider('${orderId}')">🛵 Assign Rider</button>
+    </div>`);
+
+  // Pre-select current rider if any
+  if (o.rider_id) selectRiderOpt(o.rider_id);
+};
+
+window.selectRiderOpt = function(riderId) {
+  document.querySelectorAll('input[name="riderSel"]').forEach(r => {
+    const id    = r.value;
+    const opt   = document.getElementById('riderOpt_' + id);
+    const check = document.getElementById('riderCheck_' + id);
+    if (parseInt(id) === parseInt(riderId)) {
+      r.checked = true;
+      if (opt)   opt.style.borderColor = '#059669';
+      if (check) { check.style.background = '#059669'; check.innerHTML = '<svg width="9" height="9" viewBox="0 0 9 9"><path d="M1.5 4.5l2 2L7.5 2" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'; }
+    } else {
+      r.checked = false;
+      if (opt)   opt.style.borderColor = 'var(--border)';
+      if (check) { check.style.background = 'var(--border)'; check.innerHTML = ''; }
+    }
+  });
+};
+
+window.confirmAssignRider = async function(orderId) {
+  const sel = document.querySelector('input[name="riderSel"]:checked');
+  if (!sel) { showToast('Please select a rider first.', 'error'); return; }
+
+  const riderId = parseInt(sel.value);
+  const riderLabel = sel.closest('label');
+  const riderName  = riderLabel ? riderLabel.querySelector('.font-weight-600, [style*="font-weight:600"]')?.textContent?.trim() || '' : '';
+
+  // Get rider full name from DOM
+  const nameEl = document.querySelector(`#riderOpt_${riderId} div[style*="font-weight:600"]`);
+  const fullName = nameEl ? nameEl.textContent.trim() : 'Rider';
+
+  const o = ORDERS_DB.find(x => x.id === orderId);
+  if (!o) return;
+
+  try {
+    await sbQuery('orders?id=eq.'+o._supaId, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        rider_id:   riderId,
+        rider_name: fullName,
+        status:     'processing',
+        rider_status: 'assigned',
+      }),
+    });
+
+    // Update local
+    o.rider_id    = riderId;
+    o.rider_name  = fullName;
+    o.status      = 'processing';
+    saveToStorage();
+    applyOrderFilters();
+    refreshDashboardKPIs();
+    closeModal();
+    showToast(`🛵 ${fullName} assigned to order ${orderId}!`, 'success');
+    pushNotif(`Order ${orderId} assigned to ${fullName} for delivery.`);
+  } catch(e) { showToast('Error assigning rider: ' + e.message, 'error'); }
 };
 
 /* ══════════════════════
