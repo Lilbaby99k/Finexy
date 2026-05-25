@@ -119,6 +119,8 @@ let INV_DB       = [];
 let NOTIFS_DB    = [];
 let nextOrderNum = 1;
 let nextSkuNum   = 1;
+let _ordersInitialLoad = true; // suppress false "new order" notifications on first page load
+const _locallyCreatedOrderIds = new Set(); // orders created in this session — suppress duplicate poll notifications
 let currencySymbol = '$';
 let CURRENT_USER   = null;   // set by initSession()
 
@@ -795,7 +797,7 @@ async function loadOrdersFromSupabase() {
       address:        r.address || '',
       notes:          r.notes || '',
       category:       r.items_summary || '',
-      items:          r.items_count   || 1,
+      items:          (r.items_count != null ? parseInt(r.items_count) : 1) || 1,
       total:          parseFloat(r.total) || 0,
       status:         r.status || 'pending',
       payment_method: r.payment_method || '',
@@ -813,47 +815,56 @@ async function loadOrdersFromSupabase() {
     const prevOrders = ORDERS_DB.slice(); // snapshot for change detection
     ORDERS_DB = mapped;
 
-    /* Detect new orders and status changes for notifications */
-    mapped.forEach(o => {
-      const prev = prevOrders.find(x => x.id === o.id);
+    /* Skip all change-detection notifications on the very first load —
+       prevOrders is empty so every order would falsely appear "new".
+       After the first load we set the flag to false for live polling.  */
+    if (!_ordersInitialLoad) {
+      /* Detect new orders and status changes for notifications */
+      mapped.forEach(o => {
+        const prev = prevOrders.find(x => x.id === o.id);
 
-      if (!prev) {
-        /* Brand new order */
-        const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
-        pushNotif('🛒 New order ' + o.id + ' from ' + o.customer + ' — ₦' + parseFloat(o.total).toLocaleString() + ' (' + payLabel + ')');
-      } else if (prev.status !== o.status) {
-        /* Status changed — notify */
-        if (o.status === 'delivered') {
-          /* Auto-complete: delivered → completed */
-          o.status = 'completed';
-          sbQuery('orders?id=eq.' + o._supaId, {
-            method: 'PATCH',
-            body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
-          }).catch(() => {});
-          pushNotif('📦 Order ' + o.id + ' delivered by ' + (o.rider_name || 'rider') + ' — automatically ✅ Completed. Balance updated.');
-        } else if (o.status === 'completed') {
-          pushNotif('✅ Order ' + o.id + ' completed — ₦' + parseFloat(o.total).toLocaleString() + ' received from ' + o.customer + '.');
-        } else if (o.status === 'rejected') {
-          pushNotif('❌ Order ' + o.id + ' was rejected by ' + (o.rider_name || 'rider') + ' — please reassign or follow up.');
-        } else if (o.status === 'paid') {
-          pushNotif('💳 Order ' + o.id + ' (' + o.customer + ') — online payment received. Awaiting delivery.');
-        } else if (o.status === 'shipped') {
-          pushNotif('🚚 Order ' + o.id + ' is out for delivery by ' + (o.rider_name || 'rider') + '.');
-        } else if (o.status === 'cancelled') {
-          pushNotif('🚫 Order ' + o.id + ' was cancelled.');
+        if (!prev) {
+          /* Brand new order arrived from another session */
+          if (_locallyCreatedOrderIds.has(o.id)) return; // this session created it — skip duplicate notification
+          const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
+          pushNotif('🛒 New order ' + o.id + ' from ' + o.customer + ' — ₦' + parseFloat(o.total).toLocaleString() + ' (' + payLabel + ')');
+        } else if (prev.status !== o.status) {
+          /* Status changed — notify */
+          if (o.status === 'delivered') {
+            /* Auto-complete: delivered → completed */
+            o.status = 'completed';
+            sbQuery('orders?id=eq.' + o._supaId, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
+            }).catch(() => {});
+            pushNotif('📦 Order ' + o.id + ' delivered by ' + (o.rider_name || 'rider') + ' — automatically ✅ Completed. Balance updated.');
+          } else if (o.status === 'completed') {
+            pushNotif('✅ Order ' + o.id + ' completed — ₦' + parseFloat(o.total).toLocaleString() + ' received from ' + o.customer + '.');
+          } else if (o.status === 'rejected') {
+            pushNotif('❌ Order ' + o.id + ' was rejected by ' + (o.rider_name || 'rider') + ' — please reassign or follow up.');
+          } else if (o.status === 'paid') {
+            pushNotif('💳 Order ' + o.id + ' (' + o.customer + ') — online payment received. Awaiting delivery.');
+          } else if (o.status === 'shipped') {
+            pushNotif('🚚 Order ' + o.id + ' is out for delivery by ' + (o.rider_name || 'rider') + '.');
+          } else if (o.status === 'cancelled') {
+            pushNotif('🚫 Order ' + o.id + ' was cancelled.');
+          }
         }
-      }
-    });
+      });
 
-    /* Notify if orders were deleted by admin */
-    prevOrders.forEach(prev => {
-      if (!mapped.find(o => o.id === prev.id)) {
-        pushNotif('🗑 Order ' + prev.id + ' was deleted by admin.');
-      }
-    });
+      /* Notify if orders were deleted by admin */
+      prevOrders.forEach(prev => {
+        if (!mapped.find(o => o.id === prev.id)) {
+          pushNotif('🗑 Order ' + prev.id + ' was deleted by admin.');
+        }
+      });
+    }
+
+    /* Mark initial load complete so polls from here trigger notifications */
+    _ordersInitialLoad = false;
 
     saveToStorage();
-    renderOrdersTable();
+    applyOrderFilters();  // rebuild S.ordersFiltered before rendering
     refreshDashboardKPIs();
   } catch(e) {
     console.warn('[Finexy] Could not load orders from Supabase:', e);
@@ -1440,6 +1451,7 @@ window.saveNewOrder = async function() {
       _supaId: supaRow ? supaRow.id : null,
     };
     ORDERS_DB.unshift(order);
+    _locallyCreatedOrderIds.add(orderId); // mark as created here — poll won't re-notify
     saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
     showToast(`Order ${orderId} added!`, 'success');
     pushNotif(`New order ${orderId} added for ${customer}.`);
