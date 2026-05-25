@@ -590,12 +590,19 @@ function renderRiderDeliveriesPage() {
                  <span style="font-weight:700;color:var(--brand);">₦${o.total.toLocaleString()}</span>
                  <span style="padding:3px 10px;border-radius:20px;font-size:.7rem;font-weight:700;background:${sc[o.status]||'#888'}22;color:${sc[o.status]||'#888'};text-transform:capitalize;white-space:nowrap;">${o.status}</span>
                  <div style="display:flex;gap:6px;">
-                   ${o.status !== 'delivered' && o.status !== 'cancelled'
-                     ? `<button onclick="markDelivered('${o.id}',${o._supaId})"
-                          style="padding:5px 11px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
-                          ✓ Delivered
-                        </button>`
-                     : `<span style="font-size:.72rem;color:#22C55E;font-weight:700;">✓ Done</span>`}
+                   ${o.status === 'completed' || o.status === 'rejected' || o.status === 'cancelled'
+                     ? `<span style="font-size:.72rem;color:${o.status==='completed'?'#22C55E':'#EF4444'};font-weight:700;">
+                          ${o.status==='completed'?'✅ Done':'❌ '+cap(o.status)}
+                        </span>`
+                     : `<button onclick="markDelivered('${o.id}',${o._supaId})"
+                           style="padding:5px 10px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+                           ✓ Delivered
+                         </button>
+                        <button onclick="markRejected('${o.id}',${o._supaId})"
+                           style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.1);color:#FCA5A5;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+                           ✕ Reject
+                         </button>`
+                   }
                  </div>
                </div>`).join('')}
              </div>`
@@ -611,18 +618,65 @@ function renderRiderDeliveriesPage() {
     const btn = event.target;
     btn.textContent = '⏳…'; btn.disabled = true;
     try {
-      /* Update in Supabase */
+      /* Step 1: Mark as delivered in Supabase */
       await sbQuery('orders?id=eq.' + supaId, {
         method: 'PATCH',
-        body: JSON.stringify({ status: 'delivered', rider_status: 'delivered' }),
+        body: JSON.stringify({
+          status:       'delivered',
+          rider_status: 'delivered',
+        }),
       });
-      /* Update local ORDERS_DB so admin dashboard reflects it */
+
+      /* Step 2: Auto-complete the order (delivered = paid + done = completed) */
+      await sbQuery('orders?id=eq.' + supaId, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
+      });
+
+      /* Step 3: Update local ORDERS_DB */
       const o = ORDERS_DB.find(x => x.id === orderId);
-      if (o) { o.status = 'delivered'; saveToStorage(); }
-      showToast('📦 Order ' + orderId + ' marked as Delivered!', 'success');
+      if (o) {
+        o.status       = 'completed';
+        o.rider_status = 'delivered';
+        saveToStorage();
+        refreshDashboardKPIs();
+        renderOrdersTable();
+      }
+
+      /* Step 4: Push notification to admin/manager/staff panel */
+      const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
+      pushNotif(`📦 Order ${orderId} delivered by ${riderName} — automatically marked ✅ Completed. Balance updated.`);
+
+      showToast('📦 Order ' + orderId + ' delivered and completed!', 'success');
       buildDeliveries();
     } catch(e) {
       btn.textContent = '✓ Delivered'; btn.disabled = false;
+      showToast('Error updating order: ' + e.message, 'error');
+    }
+  };
+
+  window.markRejected = async function(orderId, supaId) {
+    const btn = event.target;
+    btn.textContent = '⏳…'; btn.disabled = true;
+    try {
+      await sbQuery('orders?id=eq.' + supaId, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'rejected', rider_status: 'rejected' }),
+      });
+      const o = ORDERS_DB.find(x => x.id === orderId);
+      if (o) {
+        o.status       = 'rejected';
+        o.rider_status = 'rejected';
+        saveToStorage();
+        refreshDashboardKPIs();
+        renderOrdersTable();
+      }
+      const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
+      pushNotif(`❌ Order ${orderId} was REJECTED by ${riderName}. Please reassign or follow up with the customer.`);
+      showToast('Order ' + orderId + ' marked as Rejected.', 'warning');
+      buildDeliveries();
+    } catch(e) {
+      btn.textContent = '✕ Reject'; btn.disabled = false;
       showToast('Error updating order: ' + e.message, 'error');
     }
   };
@@ -735,22 +789,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderOrdersTable();
   renderInvTable();
   renderStockAlertBanner();
-  // Poll for new store orders every 30 seconds
+  /* ── Live sync: poll Supabase every 15 seconds ──
+     • Detects new orders, status changes (rider delivered/rejected)
+     • Auto-completes orders when rider marks delivered
+     • Updates dashboard KPIs and notifies all roles in real-time   */
   setInterval(async () => {
     await loadOrdersFromSupabase();
-    renderOrdersTable();
-    refreshDashboardKPIs();
-  }, 30000);
+    /* If rider is logged in, refresh their deliveries list too */
+    if (CURRENT_USER && CURRENT_USER.role === 'rider') {
+      renderRiderDeliveriesPage();
+    }
+  }, 15000);
 });
 
 async function loadOrdersFromSupabase() {
   try {
     const rows = await sbQuery('orders?select=*&order=created_at.desc');
-    // Map Supabase orders → admin panel format
+
     const mapped = rows.map(r => ({
-      id:             r.order_id || ('#STO-' + r.id),
+      id:             r.order_id || ('STO-' + r.id),
       date:           r.date || r.created_at?.slice(0,10),
-      customer:       r.customer,
+      customer:       r.customer || '—',
       phone:          r.phone || '',
       email:          r.email || '',
       address:        r.address || '',
@@ -760,27 +819,62 @@ async function loadOrdersFromSupabase() {
       total:          parseFloat(r.total) || 0,
       status:         r.status || 'pending',
       payment_method: r.payment_method || '',
+      rider_id:       r.rider_id   || null,
+      rider_name:     r.rider_name || '',
+      rider_status:   r.rider_status || '',
       _fromStore:     true,
       _supaId:        r.id,
     }));
 
-    // Merge: keep locally-created orders + add store orders not already in ORDERS_DB
     const existingIds = new Set(ORDERS_DB.map(o => o.id));
+
     mapped.forEach(o => {
       if (!existingIds.has(o.id)) {
+        /* Brand new order — add and notify */
         ORDERS_DB.push(o);
-        // Notify admin of new store order
-        if (o._fromStore) pushNotif(`🛒 New store order ${o.id} from ${o.customer} — ₦${o.total.toLocaleString()}`);
+        const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
+        pushNotif(`🛒 New order ${o.id} from ${o.customer} — ₦${parseFloat(o.total).toLocaleString()} (${payLabel})`);
       } else {
-        // Update status if changed
+        /* Existing order — detect status changes and notify */
         const existing = ORDERS_DB.find(x => x.id === o.id);
-        if (existing) existing.status = o.status;
+        if (existing && existing.status !== o.status) {
+          const prevStatus = existing.status;
+          existing.status      = o.status;
+          existing.rider_name  = o.rider_name  || existing.rider_name;
+          existing.rider_id    = o.rider_id    || existing.rider_id;
+          existing.rider_status= o.rider_status|| existing.rider_status;
+
+          /* Notify all staff/admin/manager of status change */
+          if (o.status === 'delivered') {
+            pushNotif(`📦 Order ${o.id} delivered to ${o.customer} by ${o.rider_name || 'rider'} — marked Completed ✅`);
+            /* Auto-complete the order and deduct stock */
+            existing.status = 'completed';
+            sbQuery('orders?id=eq.'+o._supaId, {
+              method: 'PATCH',
+              body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
+            }).catch(()=>{});
+            refreshDashboardKPIs();
+          } else if (o.status === 'rejected') {
+            pushNotif(`❌ Order ${o.id} was rejected by ${o.rider_name || 'rider'} — reassign or follow up.`);
+          } else if (o.status === 'paid') {
+            pushNotif(`💳 Order ${o.id} (${o.customer}) — payment received online. Awaiting delivery.`);
+          } else if (o.status === 'shipped') {
+            pushNotif(`🚚 Order ${o.id} is now out for delivery by ${o.rider_name || 'rider'}.`);
+          } else if (o.status === 'completed') {
+            pushNotif(`✅ Order ${o.id} completed — ₦${parseFloat(o.total).toLocaleString()} received from ${o.customer}.`);
+            refreshDashboardKPIs();
+          } else if (o.status === 'cancelled') {
+            pushNotif(`🚫 Order ${o.id} was cancelled.`);
+          }
+        }
       }
     });
 
     saveToStorage();
+    renderOrdersTable();
+    refreshDashboardKPIs();
   } catch(e) {
-    console.warn('Could not load orders from Supabase:', e);
+    console.warn('[Finexy] Could not load orders from Supabase:', e);
   }
 }
 
@@ -1003,13 +1097,37 @@ function updatePip() {
 ══════════════════════ */
 function refreshDashboardKPIs() {
   const sym = currencySymbol;
-  document.getElementById('kpiSales').textContent     = ORDERS_DB.length;
-  const unique = new Set(ORDERS_DB.map(o => o.customer.toLowerCase())).size;
+  /* Total orders */
+  document.getElementById('kpiSales').textContent = ORDERS_DB.length;
+  /* Unique customers */
+  const unique = new Set(ORDERS_DB.filter(o=>o.customer).map(o => o.customer.toLowerCase())).size;
   document.getElementById('kpiCustomers').textContent = unique;
-  const cancelled = ORDERS_DB.filter(o => o.status === 'cancelled').length;
-  document.getElementById('kpiReturns').textContent   = cancelled;
-  const revenue = ORDERS_DB.filter(o => o.status === 'completed').reduce((s,o) => s + o.total, 0);
-  document.getElementById('kpiRevenue').textContent   = sym + revenue.toFixed(2);
+  /* Rejected + cancelled orders */
+  const rejected = ORDERS_DB.filter(o => o.status === 'cancelled' || o.status === 'rejected').length;
+  document.getElementById('kpiReturns').textContent = rejected;
+  /* Revenue = completed + delivered (rider marked done, auto-completed) + paid online */
+  const revenue = ORDERS_DB
+    .filter(o => ['completed','delivered','paid'].includes(o.status))
+    .reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
+  document.getElementById('kpiRevenue').textContent = sym + revenue.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+/* ══════════════════════
+   STATUS LABEL HELPER
+   Maps internal status codes to display labels
+══════════════════════ */
+function statusLabel(o) {
+  const map = {
+    pending:    '⏳ Pending',
+    processing: '⚙️ Processing',
+    shipped:    '🚚 Out for Delivery',
+    delivered:  '📦 Delivered',
+    completed:  '✅ Completed',
+    paid:       '💳 Paid — Awaiting Delivery',
+    rejected:   '❌ Rejected',
+    cancelled:  '🚫 Cancelled',
+  };
+  return map[o.status] || cap(o.status);
 }
 
 /* ══════════════════════
@@ -1116,8 +1234,9 @@ function renderOrdersTable() {
       </td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;" title="${o.category}">${o.category}</td>
       <td>
-        <span class="badge ${o.status}">${cap(o.status)}</span>
+        <span class="badge ${o.status}">${statusLabel(o)}</span>
         ${o.payment_method ? `<div style="font-size:.65rem;color:var(--t2);margin-top:3px;">${o.payment_method}</div>` : ''}
+        ${o.rider_name ? `<div style="font-size:.65rem;color:#34D399;margin-top:2px;">🛵 ${o.rider_name}</div>` : ''}
       </td>
       <td>${o.items} item${o.items !== 1 ? 's':''}</td>
       <td style="font-weight:700">${sym}${o.total.toFixed(2)}</td>
@@ -1358,7 +1477,7 @@ function openOrderView(o) {
       <div class="di"><label>Payment Method</label><span>${o.payment_method || '—'}</span></div>
       <div class="di">
         <label>Status</label>
-        <span><span class="badge ${o.status}">${cap(o.status)}</span></span>
+        <span><span class="badge ${o.status}">${statusLabel(o)}</span></span>
       </div>
       <div class="di">
         <label>Total</label>
@@ -1401,9 +1520,12 @@ function openOrderEdit(o) {
         <select id="est">
           <option value="pending"    ${o.status==='pending'    ?'selected':''}>⏳ Pending</option>
           <option value="processing" ${o.status==='processing' ?'selected':''}>⚙️ Processing</option>
+          <option value="paid"       ${o.status==='paid'       ?'selected':''}>💳 Paid — Awaiting Delivery</option>
           <option value="shipped"    ${o.status==='shipped'    ?'selected':''}>🚚 Shipped / Out for Delivery</option>
-          <option value="completed"  ${o.status==='completed'  ?'selected':''}>✅ Completed / Paid</option>
-          <option value="cancelled"  ${o.status==='cancelled'  ?'selected':''}>❌ Cancelled</option>
+          <option value="delivered"  ${o.status==='delivered'  ?'selected':''}>📦 Delivered</option>
+          <option value="completed"  ${o.status==='completed'  ?'selected':''}>✅ Completed</option>
+          <option value="rejected"   ${o.status==='rejected'   ?'selected':''}>❌ Rejected</option>
+          <option value="cancelled"  ${o.status==='cancelled'  ?'selected':''}>🚫 Cancelled</option>
         </select>
       </div>
     </div>
@@ -1463,16 +1585,29 @@ window.saveOrderEdit = async function(id) {
   }
 
   saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
-  showToast(`Order ${id} updated to "${cap(o.status)}"!`, 'success');
-  pushNotif(`Order ${id} status changed to ${cap(o.status)}.`);
+  showToast(`Order ${id} updated to "${statusLabel(o)}"!`, 'success');
 
-  if (prevStatus !== 'completed' && o.status === 'completed') {
+  /* Fire appropriate notifications based on new status */
+  if (o.status === 'completed' && prevStatus !== 'completed') {
     const didDeduct = deductInventoryForOrder(o);
-    if (!didDeduct) showToast(`Order marked completed. No matching product found to deduct stock.`, 'warning');
-    pushNotif(`Order ${id} completed — payment received from ${o.customer}.`);
+    if (!didDeduct) showToast('No matching product found to deduct stock.', 'warning');
+    pushNotif(`✅ Order ${id} completed — ₦${o.total.toLocaleString()} received from ${o.customer}.`);
+    refreshDashboardKPIs();
   }
-  if (prevStatus !== 'shipped' && o.status === 'shipped') {
-    pushNotif(`🚚 Order ${id} is out for delivery to ${o.customer}.`);
+  if (o.status === 'delivered' && prevStatus !== 'delivered') {
+    pushNotif(`📦 Order ${id} delivered to ${o.customer}. Awaiting completion confirmation.`);
+  }
+  if (o.status === 'paid' && prevStatus !== 'paid') {
+    pushNotif(`💳 Order ${id} — online payment received from ${o.customer}. Awaiting delivery.`);
+  }
+  if (o.status === 'shipped' && prevStatus !== 'shipped') {
+    pushNotif(`🚚 Order ${id} is out for delivery to ${o.customer}${o.rider_name ? ' via ' + o.rider_name : ''}.`);
+  }
+  if (o.status === 'rejected' && prevStatus !== 'rejected') {
+    pushNotif(`❌ Order ${id} marked as Rejected. Follow up with ${o.customer}.`);
+  }
+  if (o.status === 'cancelled' && prevStatus !== 'cancelled') {
+    pushNotif(`🚫 Order ${id} cancelled.`);
   }
 };
 
