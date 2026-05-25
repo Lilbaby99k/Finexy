@@ -594,11 +594,11 @@ function renderRiderDeliveriesPage() {
                      ? `<span style="font-size:.72rem;color:${o.status==='completed'?'#22C55E':'#EF4444'};font-weight:700;">
                           ${o.status==='completed'?'✅ Done':'❌ '+cap(o.status)}
                         </span>`
-                     : `<button onclick="markDelivered('${o.id}',${o._supaId})"
+                     : `<button onclick="markDelivered('${o.id}',${o._supaId},this)"
                            style="padding:5px 10px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
                            ✓ Delivered
                          </button>
-                        <button onclick="markRejected('${o.id}',${o._supaId})"
+                        <button onclick="markRejected('${o.id}',${o._supaId},this)"
                            style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.1);color:#FCA5A5;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
                            ✕ Reject
                          </button>`
@@ -614,26 +614,17 @@ function renderRiderDeliveriesPage() {
       </div>`;
   }
 
-  window.markDelivered = async function(orderId, supaId) {
-    const btn = event.target;
-    btn.textContent = '⏳…'; btn.disabled = true;
+  window.markDelivered = async function(orderId, supaId, btn) {
+    if (!btn) btn = event && event.target ? event.target : null;
+    if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
     try {
-      /* Step 1: Mark as delivered in Supabase */
-      await sbQuery('orders?id=eq.' + supaId, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status:       'delivered',
-          rider_status: 'delivered',
-        }),
-      });
-
-      /* Step 2: Auto-complete the order (delivered = paid + done = completed) */
+      /* Mark as completed directly in Supabase */
       await sbQuery('orders?id=eq.' + supaId, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
       });
 
-      /* Step 3: Update local ORDERS_DB */
+      /* Update local ORDERS_DB */
       const o = ORDERS_DB.find(x => x.id === orderId);
       if (o) {
         o.status       = 'completed';
@@ -643,21 +634,19 @@ function renderRiderDeliveriesPage() {
         renderOrdersTable();
       }
 
-      /* Step 4: Push notification to admin/manager/staff panel */
       const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
       pushNotif(`📦 Order ${orderId} delivered by ${riderName} — automatically marked ✅ Completed. Balance updated.`);
-
       showToast('📦 Order ' + orderId + ' delivered and completed!', 'success');
       buildDeliveries();
     } catch(e) {
-      btn.textContent = '✓ Delivered'; btn.disabled = false;
+      if (btn) { btn.textContent = '✓ Delivered'; btn.disabled = false; }
       showToast('Error updating order: ' + e.message, 'error');
     }
   };
 
-  window.markRejected = async function(orderId, supaId) {
-    const btn = event.target;
-    btn.textContent = '⏳…'; btn.disabled = true;
+  window.markRejected = async function(orderId, supaId, btn) {
+    if (!btn) btn = event && event.target ? event.target : null;
+    if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
     try {
       await sbQuery('orders?id=eq.' + supaId, {
         method: 'PATCH',
@@ -676,7 +665,7 @@ function renderRiderDeliveriesPage() {
       showToast('Order ' + orderId + ' marked as Rejected.', 'warning');
       buildDeliveries();
     } catch(e) {
-      btn.textContent = '✕ Reject'; btn.disabled = false;
+      if (btn) { btn.textContent = '✕ Reject'; btn.disabled = false; }
       showToast('Error updating order: ' + e.message, 'error');
     }
   };
