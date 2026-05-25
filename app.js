@@ -785,6 +785,7 @@ async function loadOrdersFromSupabase() {
   try {
     const rows = await sbQuery('orders?select=*&order=created_at.desc');
 
+    /* Map Supabase rows to local format */
     const mapped = rows.map(r => ({
       id:             r.order_id || ('STO-' + r.id),
       date:           r.date || r.created_at?.slice(0,10),
@@ -798,54 +799,56 @@ async function loadOrdersFromSupabase() {
       total:          parseFloat(r.total) || 0,
       status:         r.status || 'pending',
       payment_method: r.payment_method || '',
-      rider_id:       r.rider_id   || null,
-      rider_name:     r.rider_name || '',
-      rider_status:   r.rider_status || '',
+      rider_id:       r.rider_id    || null,
+      rider_name:     r.rider_name  || '',
+      rider_status:   r.rider_status|| '',
       _fromStore:     true,
       _supaId:        r.id,
     }));
 
-    const existingIds = new Set(ORDERS_DB.map(o => o.id));
+    /* ── SUPABASE IS THE SINGLE SOURCE OF TRUTH ──
+       Always replace ORDERS_DB entirely from Supabase.
+       This means deletions by admin instantly reflect on
+       manager/staff dashboards on the next poll.          */
+    const prevOrders = ORDERS_DB.slice(); // snapshot for change detection
+    ORDERS_DB = mapped;
 
+    /* Detect new orders and status changes for notifications */
     mapped.forEach(o => {
-      if (!existingIds.has(o.id)) {
-        /* Brand new order — add and notify */
-        ORDERS_DB.push(o);
-        const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
-        pushNotif(`🛒 New order ${o.id} from ${o.customer} — ₦${parseFloat(o.total).toLocaleString()} (${payLabel})`);
-      } else {
-        /* Existing order — detect status changes and notify */
-        const existing = ORDERS_DB.find(x => x.id === o.id);
-        if (existing && existing.status !== o.status) {
-          const prevStatus = existing.status;
-          existing.status      = o.status;
-          existing.rider_name  = o.rider_name  || existing.rider_name;
-          existing.rider_id    = o.rider_id    || existing.rider_id;
-          existing.rider_status= o.rider_status|| existing.rider_status;
+      const prev = prevOrders.find(x => x.id === o.id);
 
-          /* Notify all staff/admin/manager of status change */
-          if (o.status === 'delivered') {
-            pushNotif(`📦 Order ${o.id} delivered to ${o.customer} by ${o.rider_name || 'rider'} — marked Completed ✅`);
-            /* Auto-complete the order and deduct stock */
-            existing.status = 'completed';
-            sbQuery('orders?id=eq.'+o._supaId, {
-              method: 'PATCH',
-              body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
-            }).catch(()=>{});
-            refreshDashboardKPIs();
-          } else if (o.status === 'rejected') {
-            pushNotif(`❌ Order ${o.id} was rejected by ${o.rider_name || 'rider'} — reassign or follow up.`);
-          } else if (o.status === 'paid') {
-            pushNotif(`💳 Order ${o.id} (${o.customer}) — payment received online. Awaiting delivery.`);
-          } else if (o.status === 'shipped') {
-            pushNotif(`🚚 Order ${o.id} is now out for delivery by ${o.rider_name || 'rider'}.`);
-          } else if (o.status === 'completed') {
-            pushNotif(`✅ Order ${o.id} completed — ₦${parseFloat(o.total).toLocaleString()} received from ${o.customer}.`);
-            refreshDashboardKPIs();
-          } else if (o.status === 'cancelled') {
-            pushNotif(`🚫 Order ${o.id} was cancelled.`);
-          }
+      if (!prev) {
+        /* Brand new order */
+        const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
+        pushNotif('🛒 New order ' + o.id + ' from ' + o.customer + ' — ₦' + parseFloat(o.total).toLocaleString() + ' (' + payLabel + ')');
+      } else if (prev.status !== o.status) {
+        /* Status changed — notify */
+        if (o.status === 'delivered') {
+          /* Auto-complete: delivered → completed */
+          o.status = 'completed';
+          sbQuery('orders?id=eq.' + o._supaId, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
+          }).catch(() => {});
+          pushNotif('📦 Order ' + o.id + ' delivered by ' + (o.rider_name || 'rider') + ' — automatically ✅ Completed. Balance updated.');
+        } else if (o.status === 'completed') {
+          pushNotif('✅ Order ' + o.id + ' completed — ₦' + parseFloat(o.total).toLocaleString() + ' received from ' + o.customer + '.');
+        } else if (o.status === 'rejected') {
+          pushNotif('❌ Order ' + o.id + ' was rejected by ' + (o.rider_name || 'rider') + ' — please reassign or follow up.');
+        } else if (o.status === 'paid') {
+          pushNotif('💳 Order ' + o.id + ' (' + o.customer + ') — online payment received. Awaiting delivery.');
+        } else if (o.status === 'shipped') {
+          pushNotif('🚚 Order ' + o.id + ' is out for delivery by ' + (o.rider_name || 'rider') + '.');
+        } else if (o.status === 'cancelled') {
+          pushNotif('🚫 Order ' + o.id + ' was cancelled.');
         }
+      }
+    });
+
+    /* Notify if orders were deleted by admin */
+    prevOrders.forEach(prev => {
+      if (!mapped.find(o => o.id === prev.id)) {
+        pushNotif('🗑 Order ' + prev.id + ' was deleted by admin.');
       }
     });
 
@@ -907,16 +910,21 @@ function saveToStorage() {
 }
 function loadFromStorage() {
   try {
-    const o  = localStorage.getItem(userKey('orders'));
-    const i  = localStorage.getItem(SHARED_INV_KEY);          // shared
+    /* NOTE: ORDERS_DB is NOT loaded from localStorage.
+       It is always fetched fresh from Supabase so that
+       deletions and changes by any role are immediately
+       reflected on all dashboards. */
+    const i  = localStorage.getItem(SHARED_INV_KEY);
     const on = localStorage.getItem(userKey('orderNum'));
-    const sn = localStorage.getItem(SHARED_SKU_KEY);          // shared
+    const sn = localStorage.getItem(SHARED_SKU_KEY);
     const cy = localStorage.getItem(CURRENT_USER ? 'finexy_currency_' + CURRENT_USER.userId : 'finexy_currency');
-    if (o)  ORDERS_DB      = JSON.parse(o);
     if (i)  INV_DB         = JSON.parse(i);
     if (on) nextOrderNum   = parseInt(on);
     if (sn) nextSkuNum     = parseInt(sn);
     if (cy) currencySymbol = cy;
+
+    /* Clear any stale cached orders from localStorage */
+    localStorage.removeItem(userKey('orders'));
   } catch(e) {}
 }
 
