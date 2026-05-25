@@ -1260,12 +1260,22 @@ function renderOrdersTable() {
       }
       if (btn.dataset.act === 'del') {
         if (!can('deleteOrder')) { denied('Delete Order'); return; }
-        confirmAction('Delete Order', `Delete order ${o.id}? This cannot be undone.`, () => {
+        confirmAction('Delete Order', `Delete order ${o.id}? This cannot be undone.`, async () => {
+          /* 1. Delete from Supabase so it never comes back on next poll */
+          if (o._supaId) {
+            try {
+              await sbQuery('orders?id=eq.' + o._supaId, { method: 'DELETE' });
+            } catch(e) {
+              showToast('Could not delete from database: ' + e.message, 'error');
+              return;
+            }
+          }
+          /* 2. Remove from local ORDERS_DB */
           ORDERS_DB.splice(ORDERS_DB.findIndex(x => x.id === o.id), 1);
           S.orderSelected.delete(o.id);
           saveToStorage(); applyOrderFilters(); refreshDashboardKPIs();
           showToast(`Order ${o.id} deleted.`, 'warning');
-          pushNotif(`Order ${o.id} was deleted.`);
+          pushNotif(`🗑 Order ${o.id} was permanently deleted.`);
         });
       }
     });
