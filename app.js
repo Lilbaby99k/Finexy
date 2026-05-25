@@ -614,64 +614,54 @@ function renderRiderDeliveriesPage() {
       </div>`;
   }
 
-  window.markDelivered = async function(orderId, supaId, btn) {
-    if (!btn) btn = event && event.target ? event.target : null;
-    if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
-    try {
-      /* Mark as completed directly in Supabase */
-      await sbQuery('orders?id=eq.' + supaId, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
-      });
-
-      /* Update local ORDERS_DB */
-      const o = ORDERS_DB.find(x => x.id === orderId);
-      if (o) {
-        o.status       = 'completed';
-        o.rider_status = 'delivered';
-        saveToStorage();
-        refreshDashboardKPIs();
-        renderOrdersTable();
-      }
-
-      const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
-      pushNotif(`📦 Order ${orderId} delivered by ${riderName} — automatically marked ✅ Completed. Balance updated.`);
-      showToast('📦 Order ' + orderId + ' delivered and completed!', 'success');
-      buildDeliveries();
-    } catch(e) {
-      if (btn) { btn.textContent = '✓ Delivered'; btn.disabled = false; }
-      showToast('Error updating order: ' + e.message, 'error');
-    }
-  };
-
-  window.markRejected = async function(orderId, supaId, btn) {
-    if (!btn) btn = event && event.target ? event.target : null;
-    if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
-    try {
-      await sbQuery('orders?id=eq.' + supaId, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'rejected', rider_status: 'rejected' }),
-      });
-      const o = ORDERS_DB.find(x => x.id === orderId);
-      if (o) {
-        o.status       = 'rejected';
-        o.rider_status = 'rejected';
-        saveToStorage();
-        refreshDashboardKPIs();
-        renderOrdersTable();
-      }
-      const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
-      pushNotif(`❌ Order ${orderId} was REJECTED by ${riderName}. Please reassign or follow up with the customer.`);
-      showToast('Order ' + orderId + ' marked as Rejected.', 'warning');
-      buildDeliveries();
-    } catch(e) {
-      if (btn) { btn.textContent = '✕ Reject'; btn.disabled = false; }
-      showToast('Error updating order: ' + e.message, 'error');
-    }
-  };
-
   buildDeliveries();
 }
+
+/* ── Rider: mark order as delivered (defined globally so onclick always finds it) ── */
+window.markDelivered = async function(orderId, supaId, btn) {
+  if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
+  try {
+    await sbQuery('orders?id=eq.' + supaId, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
+    });
+    const o = ORDERS_DB.find(x => x.id === orderId);
+    if (o) {
+      o.status = 'completed'; o.rider_status = 'delivered';
+      saveToStorage(); refreshDashboardKPIs(); renderOrdersTable();
+    }
+    const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
+    pushNotif('📦 Order ' + orderId + ' delivered by ' + riderName + ' — automatically marked ✅ Completed. Balance updated.');
+    showToast('📦 Order ' + orderId + ' delivered and completed!', 'success');
+    renderRiderDeliveriesPage();
+  } catch(e) {
+    if (btn) { btn.textContent = '✓ Delivered'; btn.disabled = false; }
+    showToast('Error updating order: ' + e.message, 'error');
+  }
+};
+
+/* ── Rider: mark order as rejected (defined globally so onclick always finds it) ── */
+window.markRejected = async function(orderId, supaId, btn) {
+  if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
+  try {
+    await sbQuery('orders?id=eq.' + supaId, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'rejected', rider_status: 'rejected' }),
+    });
+    const o = ORDERS_DB.find(x => x.id === orderId);
+    if (o) {
+      o.status = 'rejected'; o.rider_status = 'rejected';
+      saveToStorage(); refreshDashboardKPIs(); renderOrdersTable();
+    }
+    const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
+    pushNotif('❌ Order ' + orderId + ' was REJECTED by ' + riderName + '. Please reassign or follow up with the customer.');
+    showToast('Order ' + orderId + ' marked as Rejected.', 'warning');
+    renderRiderDeliveriesPage();
+  } catch(e) {
+    if (btn) { btn.textContent = '✕ Reject'; btn.disabled = false; }
+    showToast('Error updating order: ' + e.message, 'error');
+  }
+};
 
 window.saveSettings = async function() {
   if (!CURRENT_USER) return;
