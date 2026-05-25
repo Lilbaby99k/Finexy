@@ -119,8 +119,6 @@ let INV_DB       = [];
 let NOTIFS_DB    = [];
 let nextOrderNum = 1;
 let nextSkuNum   = 1;
-let _ordersInitialLoad = true; // suppress false "new order" notifications on first page load
-const _locallyCreatedOrderIds = new Set(); // orders created in this session — suppress duplicate poll notifications
 let currencySymbol = '$';
 let CURRENT_USER   = null;   // set by initSession()
 
@@ -797,7 +795,7 @@ async function loadOrdersFromSupabase() {
       address:        r.address || '',
       notes:          r.notes || '',
       category:       r.items_summary || '',
-      items:          (r.items_count != null ? parseInt(r.items_count) : 1) || 1,
+      items:          r.items_count   || 1,
       total:          parseFloat(r.total) || 0,
       status:         r.status || 'pending',
       payment_method: r.payment_method || '',
@@ -815,56 +813,47 @@ async function loadOrdersFromSupabase() {
     const prevOrders = ORDERS_DB.slice(); // snapshot for change detection
     ORDERS_DB = mapped;
 
-    /* Skip all change-detection notifications on the very first load —
-       prevOrders is empty so every order would falsely appear "new".
-       After the first load we set the flag to false for live polling.  */
-    if (!_ordersInitialLoad) {
-      /* Detect new orders and status changes for notifications */
-      mapped.forEach(o => {
-        const prev = prevOrders.find(x => x.id === o.id);
+    /* Detect new orders and status changes for notifications */
+    mapped.forEach(o => {
+      const prev = prevOrders.find(x => x.id === o.id);
 
-        if (!prev) {
-          /* Brand new order arrived from another session */
-          if (_locallyCreatedOrderIds.has(o.id)) return; // this session created it — skip duplicate notification
-          const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
-          pushNotif('🛒 New order ' + o.id + ' from ' + o.customer + ' — ₦' + parseFloat(o.total).toLocaleString() + ' (' + payLabel + ')');
-        } else if (prev.status !== o.status) {
-          /* Status changed — notify */
-          if (o.status === 'delivered') {
-            /* Auto-complete: delivered → completed */
-            o.status = 'completed';
-            sbQuery('orders?id=eq.' + o._supaId, {
-              method: 'PATCH',
-              body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
-            }).catch(() => {});
-            pushNotif('📦 Order ' + o.id + ' delivered by ' + (o.rider_name || 'rider') + ' — automatically ✅ Completed. Balance updated.');
-          } else if (o.status === 'completed') {
-            pushNotif('✅ Order ' + o.id + ' completed — ₦' + parseFloat(o.total).toLocaleString() + ' received from ' + o.customer + '.');
-          } else if (o.status === 'rejected') {
-            pushNotif('❌ Order ' + o.id + ' was rejected by ' + (o.rider_name || 'rider') + ' — please reassign or follow up.');
-          } else if (o.status === 'paid') {
-            pushNotif('💳 Order ' + o.id + ' (' + o.customer + ') — online payment received. Awaiting delivery.');
-          } else if (o.status === 'shipped') {
-            pushNotif('🚚 Order ' + o.id + ' is out for delivery by ' + (o.rider_name || 'rider') + '.');
-          } else if (o.status === 'cancelled') {
-            pushNotif('🚫 Order ' + o.id + ' was cancelled.');
-          }
+      if (!prev) {
+        /* Brand new order */
+        const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
+        pushNotif('🛒 New order ' + o.id + ' from ' + o.customer + ' — ₦' + parseFloat(o.total).toLocaleString() + ' (' + payLabel + ')');
+      } else if (prev.status !== o.status) {
+        /* Status changed — notify */
+        if (o.status === 'delivered') {
+          /* Auto-complete: delivered → completed */
+          o.status = 'completed';
+          sbQuery('orders?id=eq.' + o._supaId, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: 'completed', rider_status: 'delivered' }),
+          }).catch(() => {});
+          pushNotif('📦 Order ' + o.id + ' delivered by ' + (o.rider_name || 'rider') + ' — automatically ✅ Completed. Balance updated.');
+        } else if (o.status === 'completed') {
+          pushNotif('✅ Order ' + o.id + ' completed — ₦' + parseFloat(o.total).toLocaleString() + ' received from ' + o.customer + '.');
+        } else if (o.status === 'rejected') {
+          pushNotif('❌ Order ' + o.id + ' was rejected by ' + (o.rider_name || 'rider') + ' — please reassign or follow up.');
+        } else if (o.status === 'paid') {
+          pushNotif('💳 Order ' + o.id + ' (' + o.customer + ') — online payment received. Awaiting delivery.');
+        } else if (o.status === 'shipped') {
+          pushNotif('🚚 Order ' + o.id + ' is out for delivery by ' + (o.rider_name || 'rider') + '.');
+        } else if (o.status === 'cancelled') {
+          pushNotif('🚫 Order ' + o.id + ' was cancelled.');
         }
-      });
+      }
+    });
 
-      /* Notify if orders were deleted by admin */
-      prevOrders.forEach(prev => {
-        if (!mapped.find(o => o.id === prev.id)) {
-          pushNotif('🗑 Order ' + prev.id + ' was deleted by admin.');
-        }
-      });
-    }
-
-    /* Mark initial load complete so polls from here trigger notifications */
-    _ordersInitialLoad = false;
+    /* Notify if orders were deleted by admin */
+    prevOrders.forEach(prev => {
+      if (!mapped.find(o => o.id === prev.id)) {
+        pushNotif('🗑 Order ' + prev.id + ' was deleted by admin.');
+      }
+    });
 
     saveToStorage();
-    applyOrderFilters();  // rebuild S.ordersFiltered before rendering
+    renderOrdersTable();
     refreshDashboardKPIs();
   } catch(e) {
     console.warn('[Finexy] Could not load orders from Supabase:', e);
@@ -874,18 +863,35 @@ async function loadOrdersFromSupabase() {
 async function loadInventoryFromSupabase() {
   try {
     const rows = await sbQuery('inventory?select=*&order=created_at.asc');
-    INV_DB = rows.map(r => ({
-      id:       r.id,
-      sku:      r.sku,
-      name:     r.name,
-      category: r.category,
-      price:    parseFloat(r.price) || 0,
-      qty:      parseInt(r.qty)     || 0,
-      lowAt:    parseInt(r.low_at)  || 5,
-      desc:     r.description       || '',
-      image:    r.image             || null,
-      updated:  r.updated           || todayStr(),
-    }));
+    INV_DB = rows.map(r => {
+      const rawDesc = r.description || '';
+      const ratingMatch = rawDesc.match(/\|\|r:([0-9.]+)\|\|/);
+      const rating  = ratingMatch ? parseFloat(ratingMatch[1]) : 0;
+      const colorsMatch = rawDesc.match(/\|\|c:([^|][^\|]*(?:\|[^|][^\|]*)*)\|\|/);
+      const sizesMatch  = rawDesc.match(/\|\|s:([^|][^\|]*(?:\|[^|][^\|]*)*)\|\|/);
+      const colors  = colorsMatch ? colorsMatch[1].split('|').map(s=>s.trim()).filter(Boolean) : [];
+      const sizes   = sizesMatch  ? sizesMatch[1].split('|').map(s=>s.trim()).filter(Boolean)  : [];
+      const cleanDesc = rawDesc
+        .replace(/\|\|r:[0-9.]+\|\|/, '')
+        .replace(/\|\|c:[^\|]*(?:\|[^\|]*)*\|\|/, '')
+        .replace(/\|\|s:[^\|]*(?:\|[^\|]*)*\|\|/, '')
+        .trim();
+      return {
+        id:       r.id,
+        sku:      r.sku,
+        name:     r.name,
+        category: r.category,
+        price:    parseFloat(r.price) || 0,
+        qty:      parseInt(r.qty)     || 0,
+        lowAt:    parseInt(r.low_at)  || 5,
+        desc:     cleanDesc,
+        colors:   colors,
+        sizes:    sizes,
+        image:    r.image             || null,
+        rating:   rating,
+        updated:  r.updated           || todayStr(),
+      };
+    });
     // Sync SKU counter
     const nums = INV_DB.map(p => parseInt(p.sku.replace('SKU-',''))||0);
     if (nums.length) nextSkuNum = Math.max(...nums) + 1;
@@ -1378,31 +1384,71 @@ function openAddOrder() {
    Called whenever an order is created or its status changes to "completed".
 ── */
 function deductInventoryForOrder(order) {
-  // Try to match by product name first, then by category
-  const term = (order.category || '').toLowerCase().trim();
-  let matched = INV_DB.find(p => p.name.toLowerCase() === term);
-  if (!matched) matched = INV_DB.find(p => p.name.toLowerCase().includes(term) || term.includes(p.name.toLowerCase()));
-  if (!matched) matched = INV_DB.find(p => p.category.toLowerCase() === term);
-  if (!matched) return false;   // no product found — no deduction
+  /* ════════════════════════════════════════════════════════
+     Parse every line item from items_summary.
+     Format: "Nike Air [Size: 42, Colour: #FF0000] (x2), Plain Tee (x1)"
+     We split on commas NOT inside brackets, extract name + qty
+     for each item, match to INV_DB, and deduct individually.
+  ════════════════════════════════════════════════════════ */
+  const summary = (order.category || '').trim();
+  if (!summary) return false;
 
-  const deduct = order.items || 1;
-  const before = matched.qty;
-  matched.qty  = Math.max(0, matched.qty - deduct);
-  matched.updated = todayStr();
+  /* Split on commas that are NOT inside [ ] */
+  const parts = summary.split(/,(?![^\[]*\])/);
 
-  saveToStorage();
-  applyInvFilters();
-  renderStockAlertBanner();
-  refreshDashboardKPIs();
-  // Sync qty deduction to Supabase
-  sbQuery('inventory?sku=eq.'+encodeURIComponent(matched.sku), { method:'PATCH', body: JSON.stringify({ qty:matched.qty, updated:matched.updated }) }).catch(()=>{});
+  let anyDeducted = false;
 
-  const st = stockStatus(matched);
-  if (st === 'low_stock')    pushNotif(`⚠️ ${matched.name} is running low (${matched.qty} left) after order ${order.id}.`);
-  if (st === 'out_of_stock') pushNotif(`🚨 ${matched.name} is now OUT OF STOCK after order ${order.id}.`);
+  parts.forEach(part => {
+    part = part.trim();
+    if (!part) return;
 
-  showToast(`📦 Stock updated: "${matched.name}" ${before} → ${matched.qty} units.`, 'success');
-  return true;
+    /* Extract qty from "(xN)" suffix */
+    const qtyMatch = part.match(/\(x(\d+)\)\s*$/);
+    const qty      = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+    /* Strip bracket variants and qty to get product name */
+    const namePart = part
+      .replace(/\(x\d+\)\s*$/, '')
+      .replace(/\s*\[.*?\]\s*$/, '')
+      .trim();
+
+    if (!namePart) return;
+
+    /* Match against inventory — exact first, then contains */
+    const nameLower = namePart.toLowerCase();
+    let p = INV_DB.find(x => x.name.toLowerCase() === nameLower);
+    if (!p) p = INV_DB.find(x => x.name.toLowerCase().includes(nameLower) || nameLower.includes(x.name.toLowerCase()));
+    if (!p) return;
+
+    const before = p.qty;
+    p.qty        = Math.max(0, p.qty - qty);
+    p.updated    = todayStr();
+
+    /* Persist to Supabase immediately — storefront Realtime listener picks this up */
+    sbQuery('inventory?sku=eq.' + encodeURIComponent(p.sku), {
+      method: 'PATCH',
+      body:   JSON.stringify({ qty: p.qty, updated: p.updated }),
+    }).catch(() => {});
+
+    const st = stockStatus(p);
+    if (st === 'out_of_stock') {
+      pushNotif(`🚨 "${p.name}" is now OUT OF STOCK after order ${order.id}.`);
+    } else if (st === 'low_stock') {
+      pushNotif(`⚠️ "${p.name}" is running low — only ${p.qty} left after order ${order.id}.`);
+    }
+
+    showToast(`📦 "${p.name}" stock: ${before} → ${p.qty}`, 'success');
+    anyDeducted = true;
+  });
+
+  if (anyDeducted) {
+    saveToStorage();
+    applyInvFilters();
+    renderStockAlertBanner();
+    refreshDashboardKPIs();
+  }
+
+  return anyDeducted;
 }
 window.deductInventoryForOrder = deductInventoryForOrder;
 
@@ -1451,7 +1497,6 @@ window.saveNewOrder = async function() {
       _supaId: supaRow ? supaRow.id : null,
     };
     ORDERS_DB.unshift(order);
-    _locallyCreatedOrderIds.add(orderId); // mark as created here — poll won't re-notify
     saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
     showToast(`Order ${orderId} added!`, 'success');
     pushNotif(`New order ${orderId} added for ${customer}.`);
@@ -1466,39 +1511,142 @@ window.saveNewOrder = async function() {
 
 /* ── View Order ── */
 function openOrderView(o) {
-  const sym  = currencySymbol;
-  const role = CURRENT_USER ? CURRENT_USER.role : 'staff';
+  const sym = currencySymbol;
+
+  /* ════════════════════════════════════════
+     Parse items_summary into structured rows
+     Format: "Nike Air Max [Size: 42, Colour: #FF0000] (x2), Plain Tee (x1)"
+  ════════════════════════════════════════ */
+  function parseOrderItems(summary) {
+    if (!summary) return [];
+    /* Split on commas that are NOT inside square brackets */
+    const parts = summary.split(/,(?![^\[]*\])/);
+    return parts.map(part => {
+      part = part.trim();
+      if (!part) return null;
+      const qtyMatch   = part.match(/\(x(\d+)\)\s*$/);
+      const qty        = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+      const withoutQty = part.replace(/\(x\d+\)\s*$/, '').trim();
+      const bracketMatch = withoutQty.match(/^(.+?)\s*\[(.+)\]\s*$/);
+      let name  = withoutQty;
+      let size  = '';
+      let color = '';
+      if (bracketMatch) {
+        name = bracketMatch[1].trim();
+        const attrs  = bracketMatch[2];
+        const sizeM  = attrs.match(/Size:\s*([^,\]]+)/i);
+        const colorM = attrs.match(/Colour:\s*([^,\]]+)/i);
+        if (sizeM)  size  = sizeM[1].trim();
+        if (colorM) color = colorM[1].trim();
+      }
+      return { name, size, color, qty };
+    }).filter(Boolean);
+  }
+
+  const lineItems   = parseOrderItems(o.category);  /* o.category holds items_summary */
+  const hasVariants = lineItems.some(i => i.size || i.color);
+
+  /* Build the items table */
+  const itemsHTML = lineItems.length
+    ? `<div style="border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;">
+        <div style="display:grid;grid-template-columns:1fr${hasVariants?' 150px':''} 56px 90px;gap:0;background:var(--bg);padding:8px 14px;font-size:.66rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--border);">
+          <span>Product</span>${hasVariants?'<span>Colour / Size</span>':''}<span style="text-align:center;">Qty</span><span style="text-align:right;">Subtotal</span>
+        </div>
+        ${lineItems.map((item, idx) => {
+          const inv       = INV_DB.find(p => p.name.toLowerCase() === item.name.toLowerCase())
+                          || INV_DB.find(p => item.name.toLowerCase().includes(p.name.toLowerCase()));
+          const unitPrice = inv       ? inv.price
+                          : lineItems.length === 1 ? o.total / item.qty
+                          : null;
+          const subtotal  = unitPrice !== null ? unitPrice * item.qty : null;
+          const isLast    = idx === lineItems.length - 1;
+          return `<div style="display:grid;grid-template-columns:1fr${hasVariants?' 150px':''} 56px 90px;gap:0;padding:11px 14px;align-items:center;font-size:.83rem;${!isLast?'border-bottom:1px solid var(--border);':''}">
+            <div>
+              <div style="font-weight:600;color:var(--t1);line-height:1.35;">${item.name}</div>
+              ${inv?`<div style="font-size:.67rem;color:var(--t3);margin-top:1px;">SKU: ${inv.sku}</div>`:''}
+            </div>
+            ${hasVariants?`<div style="display:flex;flex-direction:column;gap:4px;">
+              ${item.color?`<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px 2px 5px;border-radius:10px;background:#EDE9FE;font-size:.67rem;font-weight:700;color:#7C3AED;width:fit-content;">
+                <span style="width:11px;height:11px;border-radius:50%;background:${item.color};border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;display:inline-block;"></span>${item.color}
+              </span>`:''}
+              ${item.size?`<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:10px;background:#DBEAFE;color:#1D4ED8;font-size:.67rem;font-weight:700;width:fit-content;">📐 ${item.size}</span>`:''}
+              ${!item.color&&!item.size?`<span style="font-size:.7rem;color:var(--t3);">—</span>`:''}
+            </div>`:''}
+            <div style="text-align:center;font-weight:800;color:var(--t1);">×${item.qty}</div>
+            <div style="text-align:right;font-weight:700;color:var(--brand);">
+              ${subtotal!==null?sym+subtotal.toLocaleString('en-NG',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}
+            </div>
+          </div>`;
+        }).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-top:2px solid var(--border);background:linear-gradient(90deg,rgba(232,68,26,.04),rgba(232,68,26,.01));">
+          <span style="font-size:.75rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;">Order Total</span>
+          <span style="font-size:1.1rem;font-weight:800;color:var(--brand);">${sym}${o.total.toLocaleString('en-NG',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+        </div>
+      </div>`
+    : `<div style="padding:12px 14px;background:var(--bg);border-radius:var(--r-sm);font-size:.82rem;color:var(--t2);">${o.category||'—'}</div>`;
+
   openModal(`Order ${o.id}`, `
-    <div class="detail-grid">
-      <div class="di">
-        <label>Order ID</label>
-        <span style="font-weight:700;color:var(--brand);">${o.id}
-          ${o._fromStore ? `<span style="font-size:.6rem;background:#059669;color:#fff;padding:2px 7px;border-radius:4px;margin-left:5px;vertical-align:middle;">STORE</span>` : ''}
-        </span>
+
+    <!-- ── Order header ── -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 16px;background:linear-gradient(135deg,rgba(232,68,26,.06),rgba(232,68,26,.02));border:1px solid rgba(232,68,26,.12);border-radius:var(--r-md);margin-bottom:18px;">
+      <div>
+        <div style="font-size:.64rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px;">Order ID</div>
+        <div style="font-size:1.05rem;font-weight:800;color:var(--brand);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${o.id}
+          ${o._fromStore?`<span style="font-size:.58rem;background:#059669;color:#fff;padding:2px 7px;border-radius:4px;vertical-align:middle;">STORE</span>`:''}
+        </div>
+        <div style="font-size:.73rem;color:var(--t2);margin-top:3px;">📅 ${fmtDate(o.date)}</div>
       </div>
-      <div class="di"><label>Date</label><span>${fmtDate(o.date)}</span></div>
-      <div class="di"><label>Customer</label><span style="font-weight:600;">${o.customer}</span></div>
-      ${o.phone   ? `<div class="di"><label>Phone</label><span>${o.phone}</span></div>` : ''}
-      ${o.email   ? `<div class="di"><label>Email</label><span>${o.email}</span></div>` : ''}
-      ${o.address ? `<div class="di" style="grid-column:1/-1"><label>Delivery Address</label><span>${o.address}</span></div>` : ''}
-      <div class="di" style="grid-column:1/-1"><label>Items Ordered</label><span>${o.category || '—'}</span></div>
-      <div class="di"><label>Quantity</label><span>${o.items} item${o.items!==1?'s':''}</span></div>
-      <div class="di"><label>Payment Method</label><span>${o.payment_method || '—'}</span></div>
-      <div class="di">
-        <label>Status</label>
-        <span><span class="badge ${o.status}">${statusLabel(o)}</span></span>
+      <div style="text-align:right;">
+        <span class="badge ${o.status}" style="font-size:.76rem;padding:5px 13px;">${statusLabel(o)}</span>
+        ${o.payment_method?`<div style="font-size:.7rem;color:var(--t2);margin-top:6px;">${o.payment_method==='Pay on Delivery'?'💵':o.payment_method==='Bank Transfer'?'🏦':'💳'} ${o.payment_method}</div>`:''}
       </div>
-      <div class="di">
-        <label>Total</label>
-        <span style="color:var(--brand);font-size:1.15rem;font-weight:800;">${sym}${o.total.toFixed(2)}</span>
-      </div>
-      ${o.rider_name ? `<div class="di"><label>Assigned Rider</label><span>🛵 ${o.rider_name}</span></div>` : ''}
-      ${o.notes ? `<div class="di" style="grid-column:1/-1"><label>Notes</label><span style="color:var(--t2);font-style:italic;">${o.notes}</span></div>` : ''}
     </div>
+
+    <!-- ── Customer details ── -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:.66rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.09em;margin-bottom:7px;">Customer Details</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Name</div>
+          <div style="font-weight:700;color:var(--t1);font-size:.9rem;">${o.customer}</div>
+        </div>
+        ${o.phone?`<div>
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Phone</div>
+          <div style="font-weight:600;color:var(--t1);font-size:.88rem;">${o.phone}</div>
+        </div>`:''}
+        ${o.email?`<div style="grid-column:1/-1;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Email</div>
+          <div style="font-weight:600;color:var(--t1);font-size:.88rem;">${o.email}</div>
+        </div>`:''}
+        ${o.address?`<div style="grid-column:1/-1;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Delivery Address</div>
+          <div style="font-weight:600;color:var(--t1);font-size:.88rem;line-height:1.45;">${o.address}</div>
+        </div>`:''}
+        ${o.notes?`<div style="grid-column:1/-1;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Delivery Notes</div>
+          <div style="font-style:italic;color:var(--t2);font-size:.82rem;">"${o.notes}"</div>
+        </div>`:''}
+        ${o.rider_name?`<div style="grid-column:1/-1;">
+          <div style="font-size:.65rem;color:var(--t3);margin-bottom:2px;text-transform:uppercase;letter-spacing:.05em;">Assigned Rider</div>
+          <div style="font-weight:700;color:#059669;font-size:.88rem;">🛵 ${o.rider_name}</div>
+        </div>`:''}
+      </div>
+    </div>
+
+    <!-- ── Items ordered ── -->
+    <div style="margin-bottom:18px;">
+      <div style="font-size:.66rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.09em;margin-bottom:7px;">
+        Items Ordered
+        <span style="font-weight:400;color:var(--t3);margin-left:5px;">(${o.items} item${o.items!==1?'s':''})</span>
+      </div>
+      ${itemsHTML}
+    </div>
+
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Close</button>
-      ${can('assignRider') ? `<button class="btn-outline" onclick="closeModal();openAssignRider('${o.id}')">🛵 Assign Rider</button>` : ''}
-      ${can('editOrder')   ? `<button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">✏️ Edit Status</button>` : ''}
+      ${can('assignRider')?`<button class="btn-outline" onclick="closeModal();openAssignRider('${o.id}')">🛵 Assign Rider</button>`:''}
+      ${can('editOrder')?`<button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">✏️ Edit Status</button>`:''}
     </div>`);
 }
 
@@ -1958,6 +2106,58 @@ function updateBulkBar() {
 }
 
 /* ── Add Product ── */
+/* ── Star Rating Picker helpers ── */
+window._currentRating = 0;
+window.setStarRating = function(val) {
+  window._currentRating = val;
+  const inp = document.getElementById('prating') || document.getElementById('eprating');
+  if (inp) inp.value = val;
+  renderStarPicker(val);
+};
+window.previewStars = function(val) { renderStarPicker(val, true); };
+window.restoreStars = function()    { renderStarPicker(window._currentRating); };
+
+function renderStarPicker(val, preview) {
+  const btns = document.querySelectorAll('#starPicker button[data-star]');
+  btns.forEach(b => {
+    const n = parseFloat(b.dataset.star);
+    b.textContent = n <= val ? '★' : '☆';
+    b.style.color = n <= val ? '#F59E0B' : 'var(--t3)';
+    b.style.transform = (!preview && n <= val) ? 'scale(1.15)' : 'scale(1)';
+  });
+  const label = document.getElementById('starLabel');
+  if (label) {
+    if (val === 0) { label.textContent = 'No rating set'; label.style.color = 'var(--t3)'; }
+    else { label.textContent = val + ' / 5 stars'; label.style.color = '#F59E0B'; }
+  }
+  // Highlight quick-pick buttons
+  document.querySelectorAll('[id^="ratingBtn_"]').forEach(b => {
+    const bv = parseFloat(b.id.replace('ratingBtn_','').replace('_','.'));
+    const active = !preview && bv === val;
+    b.style.background = active ? '#F59E0B' : 'var(--surface)';
+    b.style.color       = active ? '#fff'    : 'var(--t2)';
+    b.style.borderColor = active ? '#F59E0B' : 'var(--border)';
+  });
+}
+
+/* ── Color preview helper ── */
+function renderColorPreviews(value, container) {
+  if (!container) return;
+  const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+  container.innerHTML = parts.map(c => {
+    const isHex = /^#[0-9A-Fa-f]{3,8}$/.test(c);
+    const display = isHex ? c : c;
+    return `<span title="${display}" style="
+      display:inline-flex;align-items:center;gap:4px;
+      padding:3px 10px 3px 6px;border-radius:20px;
+      border:1px solid var(--border);background:var(--surface);
+      font-size:.72rem;font-weight:600;color:var(--t1);">
+      <span style="width:14px;height:14px;border-radius:50%;background:${display};border:1px solid rgba(0,0,0,.15);flex-shrink:0;display:inline-block;"></span>
+      ${display}
+    </span>`;
+  }).join('');
+}
+
 function openAddProduct() {
   const sku = 'SKU-' + String(nextSkuNum).padStart(3, '0');
   openModal('Add New Product', `
@@ -1991,6 +2191,40 @@ function openAddProduct() {
     <div class="mform-row single">
       <div class="fg"><label>Description (optional)</label><textarea id="pdesc" placeholder="Product description…"></textarea></div>
     </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Available Colours <span style="font-size:.72rem;color:var(--t3);font-weight:400;">(comma-separated hex codes or names, e.g. #FF0000, #000080, White)</span></label>
+        <input id="pcolors" type="text" placeholder="e.g. #000000, #FFFFFF, #FF0000" style="font-family:monospace;"/>
+        <div id="pcolorsPreview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;min-height:20px;"></div>
+      </div>
+    </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Available Sizes <span style="font-size:.72rem;color:var(--t3);font-weight:400;">(comma-separated, e.g. S, M, L, XL or 40, 41, 42)</span></label>
+        <input id="psizes" type="text" placeholder="e.g. S, M, L, XL, XXL"/>
+      </div>
+    </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Product Rating</label>
+        <div id="starPickerWrap" style="display:flex;flex-direction:column;gap:10px;margin-top:4px;">
+          <div id="starPicker" style="display:flex;gap:6px;align-items:center;">
+            ${[1,2,3,4,5].map(i => `
+              <button type="button" data-star="${i}" onclick="setStarRating(${i})"
+                style="font-size:1.6rem;background:none;border:none;cursor:pointer;padding:0;line-height:1;transition:transform .1s;"
+                onmouseover="previewStars(${i})" onmouseout="restoreStars()">☆</button>`).join('')}
+            <span id="starLabel" style="font-size:.82rem;color:var(--t2);margin-left:8px;">No rating set</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${[1,1.5,2,2.5,3,3.5,4,4.5,5].map(v => `
+              <button type="button" onclick="setStarRating(${v})"
+                style="padding:3px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--t2);font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;"
+                id="ratingBtn_${String(v).replace('.','_')}">${v}★</button>`).join('')}
+          </div>
+        </div>
+        <input type="hidden" id="prating" value="0"/>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn-primary" onclick="saveNewProduct()">Add Product</button>
@@ -2020,26 +2254,42 @@ function openAddProduct() {
       });
     }
     window._prodImgData = null;
+    window._currentRating = 0;
+
+    /* Colour preview */
+    const colInp = document.getElementById('pcolors');
+    const colPrev = document.getElementById('pcolorsPreview');
+    if (colInp && colPrev) {
+      colInp.addEventListener('input', () => renderColorPreviews(colInp.value, colPrev));
+    }
   }, 50);
 }
 
 window.saveNewProduct = async function() {
-  const name  = document.getElementById('pn').value.trim();
-  const cat   = document.getElementById('pcat').value;
-  const price = parseFloat(document.getElementById('pp').value);
-  const qty   = parseInt(document.getElementById('pq').value) || 0;
-  const lowAt = parseInt(document.getElementById('pla').value) || 5;
-  const desc  = document.getElementById('pdesc').value.trim();
+  const name   = document.getElementById('pn').value.trim();
+  const cat    = document.getElementById('pcat').value;
+  const price  = parseFloat(document.getElementById('pp').value);
+  const qty    = parseInt(document.getElementById('pq').value) || 0;
+  const lowAt  = parseInt(document.getElementById('pla').value) || 5;
+  const desc   = document.getElementById('pdesc').value.trim();
+  const rating = parseFloat(document.getElementById('prating')?.value) || 0;
+  const colorsRaw = (document.getElementById('pcolors')?.value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const sizesRaw  = (document.getElementById('psizes')?.value  || '').split(',').map(s=>s.trim()).filter(Boolean);
   if (!name || !cat || isNaN(price) || price < 0) {
     showToast('Please fill all required fields.', 'error'); return;
   }
   const sku = 'SKU-' + String(nextSkuNum).padStart(3, '0');
   nextSkuNum++;
-  const newProduct = { sku, name, category:cat, price, qty, low_at:lowAt, description:desc, image: window._prodImgData || null, updated: todayStr() };
+  /* Encode rating, colors, sizes as meta prefix in description so no schema change is needed */
+  let encodedDesc = desc;
+  if (rating > 0)          encodedDesc = `||r:${rating}||` + encodedDesc;
+  if (colorsRaw.length)    encodedDesc = `||c:${colorsRaw.join('|')}||` + encodedDesc;
+  if (sizesRaw.length)     encodedDesc = `||s:${sizesRaw.join('|')}||` + encodedDesc;
+  const newProduct = { sku, name, category:cat, price, qty, low_at:lowAt, description:encodedDesc, image: window._prodImgData || null, updated: todayStr() };
   try {
     const rows = await sbQuery('inventory', { method:'POST', body: JSON.stringify(newProduct) });
     const saved = rows[0];
-    INV_DB.push({ id:saved.id, sku, name, category:cat, price, qty, lowAt, desc, image: window._prodImgData||null, updated: todayStr() });
+    INV_DB.push({ id:saved.id, sku, name, category:cat, price, qty, lowAt, desc, colors:colorsRaw, sizes:sizesRaw, image: window._prodImgData||null, updated: todayStr(), rating });
     window._prodImgData = null;
     saveToStorage(); closeModal(); applyInvFilters(); renderStockAlertBanner();
     showToast(`"${name}" added to inventory!`, 'success');
@@ -2054,6 +2304,20 @@ function openProductView(p) {
   const sym = currencySymbol;
   const st  = stockStatus(p);
   const imgHTML = p.image ? `<img src="${p.image}" style="width:100%;height:140px;object-fit:cover;border-radius:var(--r-sm);border:1px solid var(--border);margin-bottom:14px"/>` : '';
+  const colorsHTML = (p.colors && p.colors.length && !(p.colors.length === 1 && p.colors[0] === '#374151'))
+    ? `<div class="di" style="grid-column:1/-1;"><label>Available Colours</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+          ${p.colors.map(c => `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px 3px 6px;border-radius:20px;border:1px solid var(--border);background:var(--surface);font-size:.72rem;font-weight:600;color:var(--t1);">
+            <span style="width:14px;height:14px;border-radius:50%;background:${c};border:1px solid rgba(0,0,0,.15);flex-shrink:0;display:inline-block;"></span>${c}
+          </span>`).join('')}
+        </div>
+      </div>` : '';
+  const sizesHTML = (p.sizes && p.sizes.length && !(p.sizes.length === 1 && p.sizes[0] === 'One Size'))
+    ? `<div class="di" style="grid-column:1/-1;"><label>Available Sizes</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+          ${p.sizes.map(s => `<span style="padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface);font-size:.78rem;font-weight:700;color:var(--t1);">${s}</span>`).join('')}
+        </div>
+      </div>` : '';
   openModal(p.name, `
     ${imgHTML}
     <div class="detail-grid">
@@ -2064,6 +2328,8 @@ function openProductView(p) {
       <div class="di"><label>Low Stock At</label><span>${p.lowAt} units</span></div>
       <div class="di"><label>Status</label><span><span class="badge ${st}">${stockLabel(st)}</span></span></div>
       <div class="di"><label>Last Updated</label><span>${fmtDate(p.updated)}</span></div>
+      ${colorsHTML}
+      ${sizesHTML}
     </div>
     ${p.desc ? `<p style="font-size:.82rem;color:var(--t2);margin-top:8px;line-height:1.6">${p.desc}</p>` : ''}
     <div class="modal-actions">
@@ -2114,12 +2380,47 @@ function openProductEdit(p) {
     <div class="mform-row single">
       <div class="fg"><label>Description</label><textarea id="edesc">${p.desc||''}</textarea></div>
     </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Available Colours <span style="font-size:.72rem;color:var(--t3);font-weight:400;">(comma-separated hex codes or names)</span></label>
+        <input id="ecolors" type="text" value="${(p.colors && !(p.colors.length===1&&p.colors[0]==='#374151')) ? p.colors.join(', ') : ''}" placeholder="e.g. #000000, #FFFFFF, #FF0000" style="font-family:monospace;"/>
+        <div id="ecolorsPreview" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;min-height:20px;"></div>
+      </div>
+    </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Available Sizes <span style="font-size:.72rem;color:var(--t3);font-weight:400;">(comma-separated)</span></label>
+        <input id="esizes" type="text" value="${(p.sizes && !(p.sizes.length===1&&p.sizes[0]==='One Size')) ? p.sizes.join(', ') : ''}" placeholder="e.g. S, M, L, XL, XXL"/>
+      </div>
+    </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Product Rating</label>
+        <div id="starPickerWrap" style="display:flex;flex-direction:column;gap:10px;margin-top:4px;">
+          <div id="starPicker" style="display:flex;gap:6px;align-items:center;">
+            ${[1,2,3,4,5].map(i => `
+              <button type="button" data-star="${i}" onclick="setStarRating(${i})"
+                style="font-size:1.6rem;background:none;border:none;cursor:pointer;padding:0;line-height:1;transition:transform .1s;"
+                onmouseover="previewStars(${i})" onmouseout="restoreStars()">☆</button>`).join('')}
+            <span id="starLabel" style="font-size:.82rem;color:var(--t2);margin-left:8px;">No rating set</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${[1,1.5,2,2.5,3,3.5,4,4.5,5].map(v => `
+              <button type="button" onclick="setStarRating(${v})"
+                style="padding:3px 10px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--t2);font-size:.72rem;font-weight:700;cursor:pointer;transition:all .15s;"
+                id="ratingBtn_${String(v).replace('.','_')}">${v}★</button>`).join('')}
+          </div>
+        </div>
+        <input type="hidden" id="eprating" value="${p.rating || 0}"/>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn-primary" onclick="saveProductEdit('${p.sku}')">Save Changes</button>
     </div>`);
 
   window._editImgData = p.image || null;
+  window._currentRating = p.rating || 0;
   setTimeout(() => {
     const inp  = document.getElementById('editImgInput');
     const wrap = document.getElementById('editImgWrap');
@@ -2137,25 +2438,45 @@ function openProductEdit(p) {
         r.readAsDataURL(file);
       });
     }
+    /* Restore the existing rating into the picker */
+    if (window._currentRating) renderStarPicker(window._currentRating);
+
+    /* Colour preview for edit modal */
+    const eColInp  = document.getElementById('ecolors');
+    const eColPrev = document.getElementById('ecolorsPreview');
+    if (eColInp && eColPrev) {
+      renderColorPreviews(eColInp.value, eColPrev);
+      eColInp.addEventListener('input', () => renderColorPreviews(eColInp.value, eColPrev));
+    }
   }, 50);
 }
 window.openProductEdit = openProductEdit;
 window.saveProductEdit = async function(sku) {
   const p = INV_DB.find(x => x.sku === sku);
   if (!p) return;
-  p.name     = document.getElementById('en').value.trim()      || p.name;
+  p.name     = document.getElementById('en').value.trim()        || p.name;
   p.category = document.getElementById('ec2').value;
-  p.price    = parseFloat(document.getElementById('ep').value) || p.price;
-  p.qty      = parseInt(document.getElementById('eq').value)   ?? p.qty;
-  p.lowAt    = parseInt(document.getElementById('ela').value)  || p.lowAt;
+  p.price    = parseFloat(document.getElementById('ep').value)   || p.price;
+  p.qty      = parseInt(document.getElementById('eq').value)     ?? p.qty;
+  p.lowAt    = parseInt(document.getElementById('ela').value)    || p.lowAt;
   p.desc     = document.getElementById('edesc').value.trim();
   p.image    = window._editImgData;
+  p.rating   = parseFloat(document.getElementById('eprating')?.value) || p.rating || 0;
   p.updated  = todayStr();
+  const colorsRaw = (document.getElementById('ecolors')?.value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const sizesRaw  = (document.getElementById('esizes')?.value  || '').split(',').map(s=>s.trim()).filter(Boolean);
+  p.colors = colorsRaw.length ? colorsRaw : (p.colors || []);
+  p.sizes  = sizesRaw.length  ? sizesRaw  : (p.sizes  || []);
   window._editImgData = null;
   try {
+    /* Encode rating, colors, sizes in description so no extra Supabase columns are needed */
+    let encodedDesc = p.desc || '';
+    if (p.rating > 0)        encodedDesc = `||r:${p.rating}||` + encodedDesc;
+    if (p.colors.length)     encodedDesc = `||c:${p.colors.join('|')}||` + encodedDesc;
+    if (p.sizes.length)      encodedDesc = `||s:${p.sizes.join('|')}||` + encodedDesc;
     await sbQuery('inventory?sku=eq.'+encodeURIComponent(sku), {
       method: 'PATCH',
-      body: JSON.stringify({ name:p.name, category:p.category, price:p.price, qty:p.qty, low_at:p.lowAt, description:p.desc, image:p.image, updated:p.updated }),
+      body: JSON.stringify({ name:p.name, category:p.category, price:p.price, qty:p.qty, low_at:p.lowAt, description:encodedDesc, image:p.image, updated:p.updated }),
     });
     saveToStorage(); closeModal(); applyInvFilters(); renderStockAlertBanner();
     showToast(`"${p.name}" updated!`, 'success');
