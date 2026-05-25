@@ -33,34 +33,70 @@ async function sbQuery(path, options={}) {
    true  = allowed | false = denied
 ══════════════════════════════════════ */
 const PERMISSIONS = {
+  /*
+   ┌─────────────────────────────────────────────────────────┐
+   │  ROLE MATRIX — what each role can and cannot do         │
+   ├────────────────────┬────────┬─────────┬───────┬─────────┤
+   │ Action             │ Admin  │ Manager │ Staff │  Rider  │
+   ├────────────────────┼────────┼─────────┼───────┼─────────┤
+   │ Dashboard          │  ✅    │   ✅    │  ✅   │   ✅   │
+   │ View Orders        │  ✅    │   ✅    │  ✅   │   ❌   │
+   │ Add Order          │  ✅    │   ✅    │  ✅   │   ❌   │
+   │ Edit Order/Status  │  ✅    │   ✅    │  ✅   │   ❌   │
+   │ Delete Order       │  ✅    │   ❌    │  ❌   │   ❌   │
+   │ Assign Rider       │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ View Inventory     │  ✅    │   ✅    │  ✅   │   ❌   │
+   │ Add Product        │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Edit Product       │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Restock Product    │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Delete Product     │  ✅    │   ❌    │  ❌   │   ❌   │
+   │ Export CSV         │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Analytics          │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Customers          │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Discounts          │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ User Management    │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Approve Users      │  ✅    │   ✅    │  ❌   │   ❌   │
+   │ Remove Users       │  ✅    │   ❌    │  ❌   │   ❌   │
+   │ Settings           │  ✅    │   ❌    │  ❌   │   ❌   │
+   │ View Deliveries    │  ❌    │   ❌    │  ❌   │   ✅   │
+   │ Update Delivery    │  ❌    │   ❌    │  ❌   │   ✅   │
+   └────────────────────┴────────┴─────────┴───────┴─────────┘
+  */
   admin: {
-    viewDashboard:true, addOrder:true, editOrder:true, deleteOrder:true,
-    viewInventory:true, addProduct:true, editProduct:true, deleteProduct:true,
-    restockProduct:true, exportCSV:true, viewAnalytics:true, viewCustomers:true,
-    viewSettings:true, viewDiscounts:true, viewStore:true, viewHelpdesk:true,
-    viewUserManagement:true, approveUsers:true, removeUsers:true, assignRider:true,
+    viewDashboard:true,
+    addOrder:true, editOrder:true, deleteOrder:true, assignRider:true,
+    viewInventory:true, addProduct:true, editProduct:true, deleteProduct:true, restockProduct:true, exportCSV:true,
+    viewAnalytics:true, viewCustomers:true, viewDiscounts:true, viewStore:true, viewHelpdesk:true,
+    viewSettings:true,
+    viewUserManagement:true, approveUsers:true, removeUsers:true,
+    viewDeliveries:false, updateDeliveryStatus:false,
   },
   manager: {
-    viewDashboard:true, addOrder:true, editOrder:true, deleteOrder:false,
-    viewInventory:true, addProduct:true, editProduct:true, deleteProduct:false,
-    restockProduct:true, exportCSV:true, viewAnalytics:true, viewCustomers:true,
-    viewSettings:false, viewDiscounts:true, viewStore:true, viewHelpdesk:true,
-    viewUserManagement:true, approveUsers:true, removeUsers:true, assignRider:true,
+    viewDashboard:true,
+    addOrder:true, editOrder:true, deleteOrder:false, assignRider:true,
+    viewInventory:true, addProduct:true, editProduct:true, deleteProduct:false, restockProduct:true, exportCSV:true,
+    viewAnalytics:true, viewCustomers:true, viewDiscounts:true, viewStore:true, viewHelpdesk:true,
+    viewSettings:false,
+    viewUserManagement:true, approveUsers:true, removeUsers:false,
+    viewDeliveries:false, updateDeliveryStatus:false,
   },
   staff: {
-    viewDashboard:true, addOrder:true, editOrder:false, deleteOrder:false,
-    viewInventory:true, addProduct:false, editProduct:false, deleteProduct:false,
-    restockProduct:false, exportCSV:false, viewAnalytics:false, viewCustomers:false,
-    viewSettings:false, viewDiscounts:false, viewStore:false, viewHelpdesk:true,
-    viewUserManagement:false, approveUsers:false, removeUsers:false, assignRider:true,
+    viewDashboard:true,
+    addOrder:true, editOrder:true, deleteOrder:false, assignRider:false,
+    viewInventory:true, addProduct:false, editProduct:false, deleteProduct:false, restockProduct:false, exportCSV:false,
+    viewAnalytics:false, viewCustomers:false, viewDiscounts:false, viewStore:false, viewHelpdesk:true,
+    viewSettings:false,
+    viewUserManagement:false, approveUsers:false, removeUsers:false,
+    viewDeliveries:false, updateDeliveryStatus:false,
   },
   rider: {
-    viewDashboard:true, addOrder:false, editOrder:false, deleteOrder:false,
-    viewInventory:false, addProduct:false, editProduct:false, deleteProduct:false,
-    restockProduct:false, exportCSV:false, viewAnalytics:false, viewCustomers:false,
-    viewSettings:false, viewDiscounts:false, viewStore:false, viewHelpdesk:true,
+    viewDashboard:false,
+    addOrder:false, editOrder:false, deleteOrder:false, assignRider:false,
+    viewInventory:false, addProduct:false, editProduct:false, deleteProduct:false, restockProduct:false, exportCSV:false,
+    viewAnalytics:false, viewCustomers:false, viewDiscounts:false, viewStore:false, viewHelpdesk:false,
+    viewSettings:false,
+    viewUserManagement:false, approveUsers:false, removeUsers:false,
     viewDeliveries:true, updateDeliveryStatus:true,
-    viewUserManagement:false, approveUsers:false, removeUsers:false, assignRider:false,
   },
 };
 
@@ -298,21 +334,24 @@ function applyRBACtoButtons() {
     }
   }
 
-  // Rider: replace orders/inventory/customers/analytics pages with restricted view
+  // Rider: replace all non-delivery pages with access denied, land on deliveries
   if (role === 'rider') {
-    ['page-orders','page-inventory','page-analytics','page-customers','page-discounts','page-store'].forEach(pgId => {
+    ['page-orders','page-inventory','page-analytics','page-customers',
+     'page-discounts','page-store','page-dashboard','page-settings',
+     'page-user-management','page-helpdesk'].forEach(pgId => {
       const pg = document.getElementById(pgId);
       if (pg) pg.innerHTML = `
-        <div class="ph"><h1>${pgId.replace('page-','').replace('-',' ').replace(/^\w/,c=>c.toUpperCase())}</h1></div>
+        <div class="ph"><h1>${pgId.replace('page-','').replace(/-/g,' ').replace(/^\w/,c=>c.toUpperCase())}</h1></div>
         <div class="blank-page">
           <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           <h2>Access Restricted</h2>
-          <p>This section is not available to <strong>Riders</strong>.<br/>Please use the Deliveries page to manage your assignments.</p>
-          <button class="btn-primary" onclick="navigateTo('deliveries')">🛵 View Deliveries</button>
+          <p>This section is not available to <strong>Riders</strong>.<br/>Use the Deliveries page to manage your assigned orders.</p>
+          <button class="btn-primary" onclick="navigateTo('deliveries')">🛵 Go to My Deliveries</button>
         </div>`;
     });
-    // Build rider deliveries page
+    // Build rider deliveries page and navigate to it
     renderRiderDeliveriesPage();
+    navigateTo('deliveries');
   }
 
   // Admin and Manager: build user management page
@@ -476,30 +515,45 @@ function renderRiderDeliveriesPage() {
   const pg = document.getElementById('page-deliveries');
   if (!pg) return;
 
-  function buildDeliveries() {
-    // Get all shared orders and show as deliveries for rider
-    let allOrders = [];
-    try {
-      const raw = localStorage.getItem('finexy_shared_orders');
-      if (raw) allOrders = JSON.parse(raw);
-      // Also gather from any user orders
-      if (!allOrders.length) {
-        const keys = Object.keys(localStorage).filter(k => k.startsWith('finexy_orders_'));
-        keys.forEach(k => {
-          try { allOrders = allOrders.concat(JSON.parse(localStorage.getItem(k))||[]); } catch(e){}
-        });
-      }
-    } catch(e){}
+  const riderId = CURRENT_USER ? CURRENT_USER.userId : null;
 
-    const statusColor = { pending:'#F59E0B', processing:'#7C3AED', shipped:'#0284C7', delivered:'#22C55E', cancelled:'#EF4444' };
-    const deliveries = allOrders.filter(o => o.status === 'shipped' || o.status === 'processing' || o.status === 'pending' || o.status === 'delivered');
+  async function buildDeliveries() {
+    pg.innerHTML = `
+      <div class="ph"><h1>My Deliveries 🛵</h1></div>
+      <div style="max-width:860px;"><div style="text-align:center;padding:48px 0;color:var(--t2);">⏳ Loading deliveries…</div></div>`;
+
+    let deliveries = [];
+    try {
+      /* Load only orders assigned to this rider from Supabase */
+      const rows = await sbQuery('orders?rider_id=eq.' + riderId + '&order=created_at.desc&select=*');
+      deliveries = rows.map(r => ({
+        id:       r.order_id || ('#' + r.id),
+        _supaId:  r.id,
+        date:     r.date || r.created_at?.slice(0,10),
+        customer: r.customer || '—',
+        phone:    r.phone || '',
+        address:  r.address || '',
+        items:    r.items_summary || '',
+        total:    parseFloat(r.total) || 0,
+        status:   r.status || 'pending',
+        payment:  r.payment_method || '',
+      }));
+    } catch(e) {
+      pg.innerHTML = `
+        <div class="ph"><h1>My Deliveries 🛵</h1></div>
+        <div class="blank-page"><h2>Could not load deliveries</h2><p>Check your connection and try again.</p>
+        <button class="btn-primary" onclick="renderRiderDeliveriesPage()">Retry</button></div>`;
+      return;
+    }
+
+    const sc = { pending:'#F59E0B', processing:'#7C3AED', shipped:'#0284C7', delivered:'#22C55E', cancelled:'#EF4444' };
 
     pg.innerHTML = `
       <div class="ph"><h1>My Deliveries 🛵</h1></div>
       <div style="max-width:860px;">
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px;">
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;">
-            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Pending</div>
+            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Assigned</div>
             <div style="font-size:1.6rem;font-weight:800;color:#F59E0B;">${deliveries.filter(o=>o.status==='pending'||o.status==='processing').length}</div>
           </div>
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;">
@@ -507,48 +561,70 @@ function renderRiderDeliveriesPage() {
             <div style="font-size:1.6rem;font-weight:800;color:#0284C7;">${deliveries.filter(o=>o.status==='shipped').length}</div>
           </div>
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;">
-            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Delivered Today</div>
+            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Delivered</div>
             <div style="font-size:1.6rem;font-weight:800;color:#22C55E;">${deliveries.filter(o=>o.status==='delivered').length}</div>
           </div>
         </div>
 
-        ${deliveries.length === 0 ? `
-          <div class="blank-page">
-            <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8zM5.5 21a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM19.5 21a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
-            <h2>No Deliveries</h2>
-            <p>There are no orders assigned for delivery at the moment. Check back soon.</p>
-          </div>` : `
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr auto;gap:12px;font-size:.7rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;">
-              <span>Order</span><span>Customer</span><span>Date</span><span>Status</span><span>Action</span>
-            </div>
-            ${deliveries.map(o => `
-            <div style="padding:13px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr auto;gap:12px;align-items:center;font-size:.83rem;">
-              <span style="font-weight:700;color:var(--brand);">#${o.num||o.id}</span>
-              <span style="color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.customer||'—'}</span>
-              <span style="color:var(--t2);font-size:.78rem;">${o.date||'—'}</span>
-              <span style="padding:3px 9px;border-radius:20px;font-size:.7rem;font-weight:700;background:${statusColor[o.status]||'#888'}22;color:${statusColor[o.status]||'#888'};text-transform:capitalize;">${o.status||'—'}</span>
-              ${o.status !== 'delivered' && o.status !== 'cancelled'
-                ? `<button onclick="markDelivered('${o.id||o.num}')" style="padding:4px 10px;border-radius:7px;border:none;background:#059669;color:#fff;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">✓ Delivered</button>`
-                : `<span style="font-size:.72rem;color:var(--t3);">—</span>`}
-            </div>`).join('')}
-          </div>`}
+        ${deliveries.length === 0
+          ? `<div class="blank-page">
+               <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8z"/></svg>
+               <h2>No Deliveries Assigned</h2>
+               <p>No orders have been assigned to you yet. An Admin or Manager will assign deliveries to you.</p>
+             </div>`
+          : `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;">
+               <div style="padding:12px 18px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1.6fr 1fr 1fr 1fr auto;gap:10px;font-size:.7rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;">
+                 <span>Order ID</span><span>Customer</span><span>Date</span><span>Total</span><span>Status</span><span>Action</span>
+               </div>
+               ${deliveries.map(o => `
+               <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1.6fr 1fr 1fr 1fr auto;gap:10px;align-items:center;font-size:.83rem;">
+                 <div>
+                   <div style="font-weight:700;color:var(--brand);font-size:.82rem;">${o.id}</div>
+                   ${o.phone ? `<div style="font-size:.7rem;color:var(--t2);">${o.phone}</div>` : ''}
+                 </div>
+                 <div>
+                   <div style="color:var(--t1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.customer}</div>
+                   ${o.address ? `<div style="font-size:.7rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${o.address}">${o.address}</div>` : ''}
+                 </div>
+                 <span style="color:var(--t2);font-size:.78rem;">${o.date || '—'}</span>
+                 <span style="font-weight:700;color:var(--brand);">₦${o.total.toLocaleString()}</span>
+                 <span style="padding:3px 10px;border-radius:20px;font-size:.7rem;font-weight:700;background:${sc[o.status]||'#888'}22;color:${sc[o.status]||'#888'};text-transform:capitalize;white-space:nowrap;">${o.status}</span>
+                 <div style="display:flex;gap:6px;">
+                   ${o.status !== 'delivered' && o.status !== 'cancelled'
+                     ? `<button onclick="markDelivered('${o.id}',${o._supaId})"
+                          style="padding:5px 11px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+                          ✓ Delivered
+                        </button>`
+                     : `<span style="font-size:.72rem;color:#22C55E;font-weight:700;">✓ Done</span>`}
+                 </div>
+               </div>`).join('')}
+             </div>`
+        }
+
+        <div style="margin-top:14px;text-align:right;">
+          <button onclick="renderRiderDeliveriesPage()" class="btn-ghost sm">🔄 Refresh</button>
+        </div>
       </div>`;
   }
 
-  window.markDelivered = function(orderId) {
-    // Mark in all user order stores
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('finexy_orders_'));
-    let updated = false;
-    keys.forEach(k => {
-      try {
-        const orders = JSON.parse(localStorage.getItem(k)||'[]');
-        const o = orders.find(x => String(x.id||x.num) === String(orderId));
-        if (o) { o.status = 'delivered'; localStorage.setItem(k, JSON.stringify(orders)); updated = true; }
-      } catch(e){}
-    });
-    if (updated) { showToast('📦 Order marked as Delivered!', 'success'); buildDeliveries(); }
-    else showToast('Order not found.', 'error');
+  window.markDelivered = async function(orderId, supaId) {
+    const btn = event.target;
+    btn.textContent = '⏳…'; btn.disabled = true;
+    try {
+      /* Update in Supabase */
+      await sbQuery('orders?id=eq.' + supaId, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'delivered', rider_status: 'delivered' }),
+      });
+      /* Update local ORDERS_DB so admin dashboard reflects it */
+      const o = ORDERS_DB.find(x => x.id === orderId);
+      if (o) { o.status = 'delivered'; saveToStorage(); }
+      showToast('📦 Order ' + orderId + ' marked as Delivered!', 'success');
+      buildDeliveries();
+    } catch(e) {
+      btn.textContent = '✓ Delivered'; btn.disabled = false;
+      showToast('Error updating order: ' + e.message, 'error');
+    }
   };
 
   buildDeliveries();
@@ -1203,10 +1279,9 @@ function deductInventoryForOrder(order) {
 }
 window.deductInventoryForOrder = deductInventoryForOrder;
 
-window.saveNewOrder = function() {
+window.saveNewOrder = async function() {
   const customer = document.getElementById('oCust').value.trim();
   const date     = document.getElementById('oDate').value;
-  // category may come from hidden input (when product picker is shown) or direct text input
   const catEl    = document.getElementById('oCat');
   const catSelEl = document.getElementById('oCatSel');
   let category   = catEl ? catEl.value.trim() : '';
@@ -1216,77 +1291,139 @@ window.saveNewOrder = function() {
   const status   = document.getElementById('oStatus').value;
   const items    = parseInt(document.getElementById('oItems').value) || 1;
   const total    = parseFloat(document.getElementById('oTotal').value);
+  const phone    = document.getElementById('oPhone') ? document.getElementById('oPhone').value.trim() : '';
+  const notes    = document.getElementById('oNotes') ? document.getElementById('oNotes').value.trim() : '';
   if (!customer || !date || !category || isNaN(total)) {
     showToast('Please fill all required fields.', 'error'); return;
   }
-  const id = '#ORD-' + String(nextOrderNum).padStart(4, '0');
+  const orderId = 'ORD-' + String(nextOrderNum).padStart(4, '0');
   nextOrderNum++;
-  const order = { id, date, customer, category, status, items, total };
-  ORDERS_DB.unshift(order);
-  saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
-  showToast(`Order ${id} added!`, 'success');
-  pushNotif(`New order ${id} added for ${customer}.`);
 
-  // Auto-deduct inventory when a new order is immediately marked as completed
-  if (status === 'completed') {
-    const didDeduct = deductInventoryForOrder(order);
-    if (!didDeduct) {
-      showToast(`Order ${id} added. No matching product found in inventory to deduct stock.`, 'warning');
+  const orderPayload = {
+    order_id:       orderId,
+    date:           date,
+    customer:       customer,
+    phone:          phone,
+    items_summary:  category,
+    items_count:    items,
+    total:          total,
+    status:         status,
+    notes:          notes,
+    payment_method: 'Manual Entry',
+    created_at:     new Date().toISOString(),
+  };
+
+  try {
+    const result = await sbQuery('orders', { method: 'POST', body: JSON.stringify(orderPayload) });
+    const supaRow = result[0];
+    const order = {
+      id: orderId, date, customer, phone,
+      category, items, total, status, notes,
+      payment_method: 'Manual Entry',
+      _fromStore: false,
+      _supaId: supaRow ? supaRow.id : null,
+    };
+    ORDERS_DB.unshift(order);
+    saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
+    showToast(`Order ${orderId} added!`, 'success');
+    pushNotif(`New order ${orderId} added for ${customer}.`);
+    if (status === 'completed') {
+      const didDeduct = deductInventoryForOrder(order);
+      if (!didDeduct) showToast(`Order added. No matching product found to deduct stock.`, 'warning');
     }
+  } catch(e) {
+    showToast('Error saving order: ' + e.message, 'error');
   }
 };
 
 /* ── View Order ── */
 function openOrderView(o) {
-  const sym = currencySymbol;
+  const sym  = currencySymbol;
+  const role = CURRENT_USER ? CURRENT_USER.role : 'staff';
   openModal(`Order ${o.id}`, `
     <div class="detail-grid">
-      <div class="di"><label>Order ID</label><span style="font-weight:700;color:var(--brand)">${o.id}${o._fromStore ? ' <span style="font-size:.65rem;background:#059669;color:#fff;padding:2px 6px;border-radius:4px;">STORE ORDER</span>' : ''}</span></div>
+      <div class="di">
+        <label>Order ID</label>
+        <span style="font-weight:700;color:var(--brand);">${o.id}
+          ${o._fromStore ? `<span style="font-size:.6rem;background:#059669;color:#fff;padding:2px 7px;border-radius:4px;margin-left:5px;vertical-align:middle;">STORE</span>` : ''}
+        </span>
+      </div>
       <div class="di"><label>Date</label><span>${fmtDate(o.date)}</span></div>
-      <div class="di"><label>Customer</label><span>${o.customer}</span></div>
-      ${o.phone ? `<div class="di"><label>Phone</label><span>${o.phone}</span></div>` : ''}
-      ${o.email ? `<div class="di"><label>Email</label><span>${o.email}</span></div>` : ''}
+      <div class="di"><label>Customer</label><span style="font-weight:600;">${o.customer}</span></div>
+      ${o.phone   ? `<div class="di"><label>Phone</label><span>${o.phone}</span></div>` : ''}
+      ${o.email   ? `<div class="di"><label>Email</label><span>${o.email}</span></div>` : ''}
       ${o.address ? `<div class="di" style="grid-column:1/-1"><label>Delivery Address</label><span>${o.address}</span></div>` : ''}
-      <div class="di" style="grid-column:1/-1"><label>Items</label><span>${o.category}</span></div>
-      <div class="di"><label>Qty</label><span>${o.items} item${o.items!==1?'s':''}</span></div>
-      <div class="di"><label>Payment</label><span>${o.payment_method || '—'}</span></div>
-      <div class="di"><label>Status</label><span><span class="badge ${o.status}">${cap(o.status)}</span></span></div>
-      <div class="di"><label>Total</label><span style="color:var(--brand);font-size:1.1rem;font-weight:800">${sym}${o.total.toFixed(2)}</span></div>
-      ${o.notes ? `<div class="di" style="grid-column:1/-1"><label>Notes</label><span style="color:var(--t2);font-style:italic">${o.notes}</span></div>` : ''}
+      <div class="di" style="grid-column:1/-1"><label>Items Ordered</label><span>${o.category || '—'}</span></div>
+      <div class="di"><label>Quantity</label><span>${o.items} item${o.items!==1?'s':''}</span></div>
+      <div class="di"><label>Payment Method</label><span>${o.payment_method || '—'}</span></div>
+      <div class="di">
+        <label>Status</label>
+        <span><span class="badge ${o.status}">${cap(o.status)}</span></span>
+      </div>
+      <div class="di">
+        <label>Total</label>
+        <span style="color:var(--brand);font-size:1.15rem;font-weight:800;">${sym}${o.total.toFixed(2)}</span>
+      </div>
+      ${o.rider_name ? `<div class="di"><label>Assigned Rider</label><span>🛵 ${o.rider_name}</span></div>` : ''}
+      ${o.notes ? `<div class="di" style="grid-column:1/-1"><label>Notes</label><span style="color:var(--t2);font-style:italic;">${o.notes}</span></div>` : ''}
     </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Close</button>
       ${can('assignRider') ? `<button class="btn-outline" onclick="closeModal();openAssignRider('${o.id}')">🛵 Assign Rider</button>` : ''}
-      <button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">Edit Status</button>
+      ${can('editOrder')   ? `<button class="btn-primary" onclick="closeModal();openOrderEdit(ORDERS_DB.find(x=>x.id==='${o.id}'))">✏️ Edit Status</button>` : ''}
     </div>`);
 }
 
 /* ── Edit Order ── */
 function openOrderEdit(o) {
-  const sym = currencySymbol;
+  if (!can('editOrder')) { denied('Edit Order'); return; }
+  const sym    = currencySymbol;
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === 'admin';
+  /* Admin and Manager can change all fields. Staff can only update status. */
   openModal(`Edit Order ${o.id}`, `
     <div class="mform-row">
-      <div class="fg"><label>Customer</label><input id="ec" type="text" value="${o.customer}"/></div>
-      <div class="fg"><label>Date</label><input id="ed" type="date" value="${o.date}"/></div>
+      <div class="fg">
+        <label>Customer</label>
+        <input id="ec" type="text" value="${o.customer}" ${!isAdmin ? 'readonly style="background:var(--bg);color:var(--t2);cursor:default"' : ''}/>
+      </div>
+      <div class="fg">
+        <label>Date</label>
+        <input id="ed" type="date" value="${o.date}" ${!isAdmin ? 'readonly style="background:var(--bg);color:var(--t2);cursor:default"' : ''}/>
+      </div>
     </div>
     <div class="mform-row">
-      <div class="fg"><label>Category</label><input id="ecat" type="text" value="${o.category}"/></div>
-      <div class="fg"><label>Status</label><select id="est">
-        <option value="pending"    ${o.status==='pending'   ?'selected':''}>Pending</option>
-        <option value="processing" ${o.status==='processing'?'selected':''}>Processing</option>
-        <option value="completed"  ${o.status==='completed' ?'selected':''}>Completed / Paid ✓</option>
-        <option value="cancelled"  ${o.status==='cancelled' ?'selected':''}>Cancelled</option>
-      </select></div>
+      <div class="fg">
+        <label>Items</label>
+        <input id="ecat" type="text" value="${o.category}" readonly style="background:var(--bg);color:var(--t2);cursor:default"/>
+      </div>
+      <div class="fg">
+        <label>Status *</label>
+        <select id="est">
+          <option value="pending"    ${o.status==='pending'    ?'selected':''}>⏳ Pending</option>
+          <option value="processing" ${o.status==='processing' ?'selected':''}>⚙️ Processing</option>
+          <option value="shipped"    ${o.status==='shipped'    ?'selected':''}>🚚 Shipped / Out for Delivery</option>
+          <option value="completed"  ${o.status==='completed'  ?'selected':''}>✅ Completed / Paid</option>
+          <option value="cancelled"  ${o.status==='cancelled'  ?'selected':''}>❌ Cancelled</option>
+        </select>
+      </div>
     </div>
     <div class="mform-row">
-      <div class="fg"><label>Items</label><input id="eit" type="number" value="${o.items}" min="1"/></div>
-      <div class="fg"><label>Total (${sym})</label><input id="etot" type="number" value="${o.total}" step="0.01" min="0"/></div>
+      <div class="fg">
+        <label>Items Count</label>
+        <input id="eit" type="number" value="${o.items}" min="1" ${!isAdmin ? 'readonly style="background:var(--bg);color:var(--t2);cursor:default"' : ''}/>
+      </div>
+      <div class="fg">
+        <label>Total (${sym})</label>
+        <input id="etot" type="number" value="${o.total}" step="0.01" min="0" ${!isAdmin ? 'readonly style="background:var(--bg);color:var(--t2);cursor:default"' : ''}/>
+      </div>
     </div>
-    ${o.status !== 'completed' ? `<div style="font-size:.76rem;color:#86EFAC;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:8px 12px;margin:8px 0">
-      💡 Changing status to <strong>Completed / Paid</strong> will automatically deduct stock from inventory.
-    </div>` : `<div style="font-size:.76rem;color:var(--t2);background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin:8px 0">
-      ✅ This order is already completed — stock was already deducted.
-    </div>`}
+    ${o.status !== 'completed'
+      ? `<div style="font-size:.76rem;color:#86EFAC;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:8px 12px;margin:8px 0;">
+           💡 Changing status to <strong>Completed / Paid</strong> will automatically deduct stock from inventory.
+         </div>`
+      : `<div style="font-size:.76rem;color:var(--t2);background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin:8px 0;">
+           ✅ This order is already completed — stock was already deducted.
+         </div>`}
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn-primary" onclick="saveOrderEdit('${o.id}')">Save Changes</button>
@@ -1297,32 +1434,45 @@ window.saveOrderEdit = async function(id) {
   const o = ORDERS_DB.find(x => x.id === id);
   if (!o) return;
   const prevStatus = o.status;
-  o.customer = document.getElementById('ec').value.trim()   || o.customer;
-  o.date     = document.getElementById('ed').value          || o.date;
-  o.category = document.getElementById('ecat').value.trim() || o.category;
-  o.status   = document.getElementById('est').value;
-  o.items    = parseInt(document.getElementById('eit').value)   || o.items;
-  o.total    = parseFloat(document.getElementById('etot').value) || o.total;
+  const isAdmin    = CURRENT_USER && CURRENT_USER.role === 'admin';
 
-  // Sync status change to Supabase for store orders
+  /* Admin can change everything; others only change status */
+  if (isAdmin) {
+    o.customer = document.getElementById('ec').value.trim()    || o.customer;
+    o.date     = document.getElementById('ed').value           || o.date;
+    o.items    = parseInt(document.getElementById('eit').value)    || o.items;
+    o.total    = parseFloat(document.getElementById('etot').value) || o.total;
+  }
+  o.status = document.getElementById('est').value;
+
+  /* Always sync to Supabase — all orders now live there */
   if (o._supaId) {
     try {
+      const patch = { status: o.status };
+      if (isAdmin) {
+        patch.customer    = o.customer;
+        patch.date        = o.date;
+        patch.items_count = o.items;
+        patch.total       = o.total;
+      }
       await sbQuery('orders?id=eq.'+o._supaId, {
         method: 'PATCH',
-        body: JSON.stringify({ status: o.status }),
+        body: JSON.stringify(patch),
       });
-    } catch(e) { console.warn('Could not sync order status:', e); }
+    } catch(e) { console.warn('Could not sync order status to Supabase:', e); }
   }
 
   saveToStorage(); closeModal(); applyOrderFilters(); refreshDashboardKPIs();
-  showToast(`Order ${id} updated!`, 'success');
+  showToast(`Order ${id} updated to "${cap(o.status)}"!`, 'success');
+  pushNotif(`Order ${id} status changed to ${cap(o.status)}.`);
 
   if (prevStatus !== 'completed' && o.status === 'completed') {
     const didDeduct = deductInventoryForOrder(o);
-    if (!didDeduct) {
-      showToast(`Order ${id} marked completed. No matching product found in inventory to deduct stock.`, 'warning');
-    }
+    if (!didDeduct) showToast(`Order marked completed. No matching product found to deduct stock.`, 'warning');
     pushNotif(`Order ${id} completed — payment received from ${o.customer}.`);
+  }
+  if (prevStatus !== 'shipped' && o.status === 'shipped') {
+    pushNotif(`🚚 Order ${id} is out for delivery to ${o.customer}.`);
   }
 };
 
