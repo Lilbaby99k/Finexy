@@ -102,6 +102,17 @@ const PERMISSIONS = {
 
 function can(action) {
   const role  = CURRENT_USER ? CURRENT_USER.role : 'staff';
+  // Admin always uses hardcoded permissions — cannot be overridden
+  if (role === 'admin') return PERMISSIONS.admin[action] === true;
+  // For other roles, check if custom permissions have been saved by admin/manager
+  const customKey = 'finexy_permissions_' + role;
+  const saved = localStorage.getItem(customKey);
+  if (saved) {
+    try {
+      const custom = JSON.parse(saved);
+      if (action in custom) return custom[action] === true;
+    } catch(e) {}
+  }
   return (PERMISSIONS[role] || PERMISSIONS.staff)[action] === true;
 }
 function denied(msg) {
@@ -278,6 +289,10 @@ function applyRBACtoSidebar(role) {
   const umLink = document.querySelector('.sb-link[data-page="user-management"]');
   if (umLink) umLink.style.display = can('viewUserManagement') ? '' : 'none';
 
+  // Show permissions link for admin and manager
+  const permLink = document.querySelector('.sb-link[data-page="permissions"]');
+  if (permLink) permLink.style.display = can('viewUserManagement') ? '' : 'none';
+
   // Show deliveries link only for rider
   const delLink = document.querySelector('.sb-link[data-page="deliveries"]');
   if (delLink) delLink.style.display = role === 'rider' ? '' : 'none';
@@ -357,13 +372,34 @@ function applyRBACtoButtons() {
   // Admin and Manager: build user management page
   if (can('viewUserManagement')) {
     renderUserManagementPage();
+    renderPermissionsPage();
   }
+
+  // Build customers page for admin and manager
+  if (can('viewCustomers')) {
+    renderCustomersPage();
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   ACCESS CODE GENERATOR
+   Generates a unique, human-readable 10-character code
+   Format: FXY-ROLE-XXXXX  (e.g. FXY-MGR-A3K9P)
+══════════════════════════════════════════════════════════ */
+function generateAccessCode(role) {
+  const chars  = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const prefix = { manager:'MGR', staff:'STF', rider:'RDR' }[role] || 'USR';
+  let rand = '';
+  for (let i = 0; i < 5; i++) rand += chars[Math.floor(Math.random() * chars.length)];
+  return `FXY-${prefix}-${rand}`;
 }
 
 /* ══════════════════════════════════════
    USER MANAGEMENT PAGE
-   Admin  → manages: manager, staff, rider
-   Manager → manages: staff, rider only
+   Admin   → can create: manager, staff, rider
+   Manager → can create: staff, rider only
+   All created accounts receive a unique Access Code.
+   They log in with: email + password + access code.
 ══════════════════════════════════════ */
 function renderUserManagementPage() {
   const pg = document.getElementById('page-user-management');
@@ -372,20 +408,20 @@ function renderUserManagementPage() {
   const isAdmin   = CURRENT_USER && CURRENT_USER.role === 'admin';
   const isManager = CURRENT_USER && CURRENT_USER.role === 'manager';
 
+  /* ── Build the user list page ── */
   async function buildPage() {
-    pg.innerHTML = `<div class="ph"><h1>User Management 👥</h1></div><div style="max-width:900px;padding:40px;text-align:center;color:var(--t2);">Loading users…</div>`;
+    pg.innerHTML = `<div class="ph"><h1>User Management 👥</h1></div><div style="max-width:960px;padding:40px;text-align:center;color:var(--t2);">Loading users…</div>`;
 
     let visible = [];
     try {
       const visibleRoles = isAdmin ? ['manager','staff','rider'] : ['staff','rider'];
-      const roleFilter = 'role=in.('+visibleRoles.join(',')+')&';
-      visible = await sbQuery('users?'+roleFilter+'&select=*&order=created_at.asc');
+      const roleFilter   = 'role=in.(' + visibleRoles.join(',') + ')';
+      visible = await sbQuery('users?' + roleFilter + '&select=*&order=created_at.asc');
     } catch(e) {
       pg.innerHTML = `<div class="ph"><h1>User Management 👥</h1></div><div style="padding:40px;text-align:center;color:#FCA5A5;">Failed to load users. Check your connection.</div>`;
       return;
     }
 
-    const pending     = visible.filter(u => !u.approved && !u.deactivated);
     const active      = visible.filter(u =>  u.approved && !u.deactivated);
     const deactivated = visible.filter(u =>  u.deactivated);
 
@@ -393,116 +429,293 @@ function renderUserManagementPage() {
     const roleIcon  = { manager:'📊', staff:'🧑‍💼', rider:'🛵' };
 
     const userRow = (u, bucket) => {
-      const initials = (u.first[0] + (u.last?.[0]||'')).toUpperCase();
-      const avatarBg = u.deactivated ? '#4A4F5E' : (roleColor[u.role]||'#888');
-      let statusBadge;
-      if (bucket==='pending')     statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(245,158,11,.15);color:#FCD34D;font-weight:600;white-space:nowrap;">⏳ Pending</span>`;
-      else if (bucket==='deactivated') statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(239,68,68,.12);color:#FCA5A5;font-weight:600;white-space:nowrap;">🚫 Inactive</span>`;
-      else statusBadge = `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(34,197,94,.12);color:#86EFAC;font-weight:600;white-space:nowrap;">✅ Active</span>`;
+      const initials = (u.first[0] + (u.last?.[0] || '')).toUpperCase();
+      const avatarBg = u.deactivated ? '#4A4F5E' : (roleColor[u.role] || '#888');
+      const statusBadge = bucket === 'deactivated'
+        ? `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(239,68,68,.12);color:#FCA5A5;font-weight:600;white-space:nowrap;">🚫 Inactive</span>`
+        : `<span style="font-size:.7rem;padding:3px 9px;border-radius:20px;background:rgba(34,197,94,.12);color:#86EFAC;font-weight:600;white-space:nowrap;">✅ Active</span>`;
+
+      const codeBadge = u.access_code
+        ? `<span title="Login Access Code" style="font-size:.68rem;padding:3px 9px;border-radius:20px;background:rgba(255,255,255,.05);border:1px solid var(--border2);color:var(--t2);font-family:monospace;white-space:nowrap;letter-spacing:.05em;">${u.access_code}</span>`
+        : '';
 
       let actionBtns = '';
-      if (bucket==='pending') {
-        actionBtns = `<button onclick="approveUser(${u.id})" style="padding:5px 12px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">✓ Approve</button>
-          <button onclick="deactivateUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">🚫 Deactivate</button>`;
-      } else if (bucket==='active') {
-        actionBtns = `<button onclick="deactivateUser(${u.id})" style="padding:5px 11px;border-radius:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);color:#FCD34D;font-size:.75rem;cursor:pointer;white-space:nowrap;">⏸ Deactivate</button>
-          <button onclick="removeUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>`;
+      if (bucket === 'active') {
+        actionBtns = `
+          <button onclick="viewUserCode(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid var(--border2);background:rgba(255,255,255,.04);color:var(--t2);font-size:.75rem;cursor:pointer;white-space:nowrap;" title="Show access code">🔑 Code</button>
+          <button onclick="deactivateUser(${u.id})" style="padding:5px 11px;border-radius:8px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);color:#FCD34D;font-size:.75rem;cursor:pointer;white-space:nowrap;">⏸ Deactivate</button>
+          ${isAdmin ? `<button onclick="removeUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>` : ''}`;
       } else {
-        actionBtns = `<button onclick="reactivateUser(${u.id})" style="padding:5px 12px;border-radius:8px;border:none;background:#0284C7;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">♻ Reactivate</button>
-          <button onclick="removeUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>`;
+        actionBtns = `
+          <button onclick="reactivateUser(${u.id})" style="padding:5px 12px;border-radius:8px;border:none;background:#0284C7;color:#fff;font-size:.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">♻ Reactivate</button>
+          ${isAdmin ? `<button onclick="removeUser(${u.id})" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.08);color:#FCA5A5;font-size:.75rem;cursor:pointer;white-space:nowrap;">✕ Remove</button>` : ''}`;
       }
 
-      return `<div class="um-row" id="umrow-${u.id}" style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--border);${u.deactivated?'opacity:.6;':''}">
+      return `<div class="um-row" id="umrow-${u.id}" style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:1px solid var(--border);${u.deactivated ? 'opacity:.6;' : ''}">
         <div style="width:38px;height:38px;border-radius:50%;background:${avatarBg};display:grid;place-items:center;font-size:.85rem;font-weight:700;color:#fff;flex-shrink:0;">${initials}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-weight:600;font-size:.88rem;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.first} ${u.last}</div>
           <div style="font-size:.72rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${u.email}</div>
         </div>
-        <span style="font-size:.7rem;padding:3px 9px;border-radius:20px;font-weight:700;background:${roleColor[u.role]||'#888'}22;color:${roleColor[u.role]||'#888'};white-space:nowrap;">${roleIcon[u.role]||''} ${(u.role||'').charAt(0).toUpperCase()+(u.role||'').slice(1)}</span>
+        <span style="font-size:.7rem;padding:3px 9px;border-radius:20px;font-weight:700;background:${(roleColor[u.role]||'#888')}22;color:${roleColor[u.role]||'#888'};white-space:nowrap;">${roleIcon[u.role]||''} ${(u.role||'').charAt(0).toUpperCase()+(u.role||'').slice(1)}</span>
         ${statusBadge}
+        ${codeBadge}
         <div style="display:flex;gap:7px;flex-shrink:0;">${actionBtns}</div>
       </div>`;
     };
 
     const scopeNote = isManager
-      ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#C4B5FD;margin-bottom:20px;display:flex;gap:8px;align-items:center;">📊 <span>As <strong>Manager</strong>, you can manage <strong>Staff</strong> and <strong>Rider</strong> accounts only.</span></div>`
-      : `<div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.18);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#FDBA74;margin-bottom:20px;display:flex;gap:8px;align-items:center;">👑 <span>As <strong>Admin</strong>, you have full access to manage all Manager, Staff, and Rider accounts.</span></div>`;
+      ? `<div style="background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.2);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#C4B5FD;margin-bottom:20px;display:flex;gap:8px;align-items:center;">📊 <span>As <strong>Manager</strong>, you can create and manage <strong>Staff</strong> and <strong>Rider</strong> accounts only.</span></div>`
+      : `<div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.18);border-radius:10px;padding:10px 16px;font-size:.78rem;color:#FDBA74;margin-bottom:20px;display:flex;gap:8px;align-items:center;">👑 <span>As <strong>Admin</strong>, you can create and manage all Manager, Staff, and Rider accounts. Each account receives a unique <strong>Access Code</strong> on creation.</span></div>`;
+
+    const createBtnLabel = isAdmin ? '+ Create Account' : '+ Create Staff / Rider';
+    const createBtnColor = isAdmin ? 'var(--brand)' : '#7C3AED';
 
     const section = (title, dotColor, borderColor, items, bucket) =>
       items.length === 0 ? '' : `
         <div style="margin-bottom:28px;">
           <h3 style="font-size:.78rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:7px;">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};"></span>${title} (${items.length})
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};"></span>${title} <span style="color:var(--t3)">(${items.length})</span>
           </h3>
-          <div style="background:var(--surface);border:1px solid ${borderColor};border-radius:12px;overflow:hidden;">${items.map(u=>userRow(u,bucket)).join('')}</div>
+          <div style="background:var(--surface);border:1px solid ${borderColor};border-radius:12px;overflow:hidden;">${items.map(u => userRow(u, bucket)).join('')}</div>
         </div>`;
 
-    const isEmpty = !pending.length && !active.length && !deactivated.length;
+    const isEmpty = !active.length && !deactivated.length;
+
     pg.innerHTML = `
-      <div class="ph"><h1>User Management 👥</h1></div>
-      <div style="max-width:900px;">
+      <div class="ph" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <h1>User Management 👥</h1>
+        <button onclick="openCreateUserModal()" style="padding:9px 20px;border-radius:10px;border:none;background:${createBtnColor};color:#fff;font-family:'DM Sans',sans-serif;font-size:.84rem;font-weight:700;cursor:pointer;box-shadow:0 4px 14px rgba(232,68,26,.25);transition:filter .15s;" onmouseover="this.style.filter='brightness(1.1)'" onmouseout="this.style.filter=''">
+          ${createBtnLabel}
+        </button>
+      </div>
+      <div style="max-width:960px;">
         ${scopeNote}
-        ${section('Pending Approval','#F59E0B','rgba(245,158,11,.25)',pending,'pending')}
-        ${section('Active Users','#22C55E','var(--border)',active,'active')}
-        ${section('Deactivated / Inactive','#EF4444','rgba(239,68,68,.2)',deactivated,'deactivated')}
+        ${section('Active Users', '#22C55E', 'var(--border)', active, 'active')}
+        ${section('Deactivated / Inactive', '#EF4444', 'rgba(239,68,68,.2)', deactivated, 'deactivated')}
         ${isEmpty ? `<div class="blank-page">
           <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <h2>No Users Yet</h2>
-          <p>${isManager ? 'Staff and Rider accounts will appear here once they register.' : 'Manager, Staff, and Rider accounts will appear here once they register.'}</p>
+          <p>Click <strong>"${createBtnLabel}"</strong> to create the first ${isManager ? 'Staff or Rider' : 'Manager, Staff, or Rider'} account.</p>
         </div>` : ''}
       </div>`;
   }
 
-  window.approveUser = async function(id) {
-    try {
-      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
-      const u = rows[0]; if(!u) return;
-      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only approve Staff and Rider accounts.','error'); return; }
-      confirmAction('Approve User', `Approve ${u.first} ${u.last}? They will be able to sign in immediately.`, async () => {
-        await sbQuery('users?id=eq.'+id, { method:'PATCH', body: JSON.stringify({ approved:true, deactivated:false }) });
-        showToast(`✅ ${u.first} ${u.last} approved! They can now sign in.`, 'success');
-        buildPage();
-      });
-    } catch(e) { showToast('Error: '+e.message,'error'); }
+  /* ── Open "Create Account" modal ── */
+  window.openCreateUserModal = function() {
+    const roleOptions = isAdmin
+      ? `<option value="manager">📊 Manager</option><option value="staff">🧑‍💼 Staff</option><option value="rider">🛵 Rider</option>`
+      : `<option value="staff">🧑‍💼 Staff</option><option value="rider">🛵 Rider</option>`;
+
+    openModal('Create New Account', `
+      <div class="mform-row">
+        <div class="fg"><label>First Name *</label><input id="cu_first" type="text" placeholder="e.g. John" class="minput"/></div>
+        <div class="fg"><label>Last Name *</label><input id="cu_last"  type="text" placeholder="e.g. Doe"  class="minput"/></div>
+      </div>
+      <div class="mform-row single">
+        <div class="fg"><label>Business / Store Name *</label><input id="cu_biz" type="text" placeholder="e.g. Finexy Lagos" class="minput"/></div>
+      </div>
+      <div class="mform-row single">
+        <div class="fg"><label>Email Address *</label><input id="cu_email" type="email" placeholder="staff@example.com" class="minput"/></div>
+      </div>
+      <div class="mform-row single">
+        <div class="fg">
+          <label>Password *</label>
+          <div style="position:relative;display:flex;align-items:center;">
+            <input id="cu_pw" type="password" placeholder="Min. 6 characters" class="minput" style="padding-right:40px;"/>
+            <button type="button" onclick="(function(btn){var i=document.getElementById('cu_pw');var s=i.type==='password';i.type=s?'text':'password';})(this)" style="position:absolute;right:10px;background:none;border:none;cursor:pointer;color:var(--t3);padding:3px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <div style="font-size:.68rem;color:var(--t3);margin-top:4px;">Choose a secure password for this user.</div>
+        </div>
+      </div>
+      <div class="mform-row single">
+        <div class="fg">
+          <label>Role *</label>
+          <select id="cu_role" class="minput" style="cursor:pointer;">${roleOptions}</select>
+        </div>
+      </div>
+      <div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.18);border-radius:10px;padding:11px 14px;font-size:.76rem;color:#FDBA74;margin-bottom:6px;line-height:1.6;">
+        🔑 <strong>An Access Code will be automatically generated</strong> when you create this account. Share it privately with the user — they will need it along with their email and password to sign in.
+      </div>
+      <div class="modal-actions">
+        <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn-primary" onclick="doCreateUser()">Create Account &amp; Generate Code</button>
+      </div>`);
   };
 
+  /* ── Execute account creation ── */
+  window.doCreateUser = async function() {
+    const first = document.getElementById('cu_first').value.trim();
+    const last  = document.getElementById('cu_last').value.trim();
+    const biz   = document.getElementById('cu_biz').value.trim();
+    const email = document.getElementById('cu_email').value.trim().toLowerCase();
+    const pw    = document.getElementById('cu_pw').value;
+    const role  = document.getElementById('cu_role').value;
+
+    if (!first || !last)             { showToast('Enter first and last name.', 'error'); return; }
+    if (!biz)                        { showToast('Enter the business/store name.', 'error'); return; }
+    if (!email || !email.includes('@')) { showToast('Enter a valid email address.', 'error'); return; }
+    if (pw.length < 6)               { showToast('Password must be at least 6 characters.', 'error'); return; }
+    if (!role)                       { showToast('Select a role.', 'error'); return; }
+    if (isManager && !['staff','rider'].includes(role)) {
+      showToast('🚫 Managers can only create Staff and Rider accounts.', 'error');
+      return;
+    }
+
+    // Check email uniqueness
+    let existing = [];
+    try {
+      existing = await sbQuery('users?email=eq.' + encodeURIComponent(email) + '&select=id');
+    } catch(e) {
+      showToast('Connection error: ' + e.message, 'error'); return;
+    }
+    if (existing.length > 0) { showToast('An account with this email already exists.', 'error'); return; }
+
+    const accessCode = generateAccessCode(role);
+
+    try {
+      const result = await sbQuery('users', {
+        method: 'POST',
+        body: JSON.stringify({
+          first,
+          last,
+          business: biz,
+          email,
+          password: pw,
+          role,
+          approved:    true,
+          deactivated: false,
+          access_code: accessCode,
+        }),
+      });
+
+      const newUser = result[0];
+      closeModal();
+
+      /* ── Show the access code to the creator — this is the ONLY time it's fully displayed ── */
+      openModal('✅ Account Created Successfully', `
+        <div style="text-align:center;padding:8px 0 16px;">
+          <div style="width:56px;height:56px;border-radius:50%;background:rgba(34,197,94,.12);border:2px solid rgba(34,197,94,.3);display:grid;place-items:center;margin:0 auto 16px;font-size:1.6rem;">✅</div>
+          <h3 style="font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:800;color:var(--t1);margin-bottom:6px;">${first} ${last}</h3>
+          <p style="font-size:.8rem;color:var(--t2);margin-bottom:20px;">${email} · <span style="font-weight:700;color:${role==='manager'?'#A78BFA':role==='rider'?'#6EE7B7':'#7DD3FC'}">${role.charAt(0).toUpperCase()+role.slice(1)}</span></p>
+
+          <div style="background:var(--surface2);border:2px dashed rgba(255,255,255,.12);border-radius:14px;padding:20px;margin-bottom:18px;">
+            <p style="font-size:.72rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">🔑 Login Access Code</p>
+            <div style="font-family:monospace;font-size:1.5rem;font-weight:800;color:var(--t1);letter-spacing:.12em;margin-bottom:8px;" id="displayedCode">${accessCode}</div>
+            <button onclick="navigator.clipboard.writeText('${accessCode}').then(()=>showToast('Access code copied!','success'))" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border2);background:rgba(255,255,255,.06);color:var(--t2);font-size:.76rem;cursor:pointer;font-family:'DM Sans',sans-serif;">📋 Copy Code</button>
+          </div>
+
+          <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:11px 14px;font-size:.74rem;color:#FCA5A5;text-align:left;line-height:1.6;margin-bottom:18px;">
+            ⚠️ <strong>Important:</strong> Share this Access Code securely and privately with <strong>${first} ${last}</strong>. They will need their <strong>email, password, and this code</strong> every time they sign in. This code will not be shown again in full — only visible in the user list.
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-primary" onclick="closeModal()">Done — I've Shared the Code</button>
+        </div>`);
+
+      showToast(`✅ ${first} ${last} (${role}) account created successfully!`, 'success');
+      buildPage();
+
+    } catch(e) {
+      showToast('Error creating account: ' + e.message, 'error');
+    }
+  };
+
+  /* ── View access code modal ── */
+  window.viewUserCode = async function(id) {
+    try {
+      const rows = await sbQuery('users?id=eq.' + id + '&select=first,last,role,email,access_code');
+      const u = rows[0]; if (!u) return;
+      openModal('🔑 Access Code — ' + u.first + ' ' + u.last, `
+        <div style="text-align:center;padding:8px 0;">
+          <p style="font-size:.8rem;color:var(--t2);margin-bottom:6px;">${u.email}</p>
+          <div style="background:var(--surface2);border:2px dashed rgba(255,255,255,.12);border-radius:14px;padding:20px;margin-bottom:16px;">
+            <p style="font-size:.7rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Login Access Code</p>
+            <div style="font-family:monospace;font-size:1.4rem;font-weight:800;color:var(--t1);letter-spacing:.12em;margin-bottom:8px;">${u.access_code || '—'}</div>
+            ${u.access_code ? `<button onclick="navigator.clipboard.writeText('${u.access_code}').then(()=>showToast('Code copied!','success'))" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border2);background:rgba(255,255,255,.06);color:var(--t2);font-size:.76rem;cursor:pointer;font-family:'DM Sans',sans-serif;">📋 Copy Code</button>` : ''}
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-ghost" onclick="closeModal()">Close</button>
+          <button class="btn-primary" onclick="regenerateCode(${id})">🔄 Regenerate Code</button>
+        </div>`);
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+  };
+
+  /* ── Regenerate access code ── */
+  window.regenerateCode = async function(id) {
+    try {
+      const rows = await sbQuery('users?id=eq.' + id + '&select=first,last,role');
+      const u = rows[0]; if (!u) return;
+      const newCode = generateAccessCode(u.role);
+      confirmAction('Regenerate Access Code',
+        `Generate a new Access Code for ${u.first} ${u.last}? Their old code will stop working immediately.`,
+        async () => {
+          await sbQuery('users?id=eq.' + id, { method: 'PATCH', body: JSON.stringify({ access_code: newCode }) });
+          closeModal();
+          openModal('🔑 New Access Code Generated', `
+            <div style="text-align:center;padding:8px 0;">
+              <p style="font-size:.8rem;color:var(--t2);margin-bottom:16px;">${u.first} ${u.last} · ${u.role}</p>
+              <div style="background:var(--surface2);border:2px dashed rgba(255,255,255,.12);border-radius:14px;padding:20px;margin-bottom:16px;">
+                <p style="font-size:.7rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">New Access Code</p>
+                <div style="font-family:monospace;font-size:1.4rem;font-weight:800;color:var(--t1);letter-spacing:.12em;margin-bottom:8px;">${newCode}</div>
+                <button onclick="navigator.clipboard.writeText('${newCode}').then(()=>showToast('Code copied!','success'))" style="padding:6px 16px;border-radius:8px;border:1px solid var(--border2);background:rgba(255,255,255,.06);color:var(--t2);font-size:.76rem;cursor:pointer;font-family:'DM Sans',sans-serif;">📋 Copy Code</button>
+              </div>
+              <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px 14px;font-size:.73rem;color:#FCA5A5;text-align:left;line-height:1.6;">
+                ⚠️ Share this new code with ${u.first} ${u.last} immediately. Their old code no longer works.
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="btn-primary" onclick="closeModal();buildPage && buildPage()">Done</button>
+            </div>`);
+          showToast(`✅ New access code generated for ${u.first} ${u.last}.`, 'success');
+          buildPage();
+        });
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+  };
+
+  /* ── Deactivate ── */
   window.deactivateUser = async function(id) {
     try {
-      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
-      const u = rows[0]; if(!u) return;
-      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only deactivate Staff and Rider accounts.','error'); return; }
-      confirmAction('Deactivate User', `Deactivate ${u.first} ${u.last}? They will no longer be able to sign in until reactivated.`, async () => {
-        await sbQuery('users?id=eq.'+id, { method:'PATCH', body: JSON.stringify({ approved:false, deactivated:true }) });
+      const rows = await sbQuery('users?id=eq.' + id + '&select=first,last,role');
+      const u = rows[0]; if (!u) return;
+      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only deactivate Staff and Rider accounts.', 'error'); return; }
+      confirmAction('Deactivate Account', `Deactivate ${u.first} ${u.last}? They will not be able to sign in until reactivated.`, async () => {
+        await sbQuery('users?id=eq.' + id, { method: 'PATCH', body: JSON.stringify({ approved: false, deactivated: true }) });
         showToast(`⏸ ${u.first} ${u.last} has been deactivated.`, 'success');
         buildPage();
       });
-    } catch(e) { showToast('Error: '+e.message,'error'); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
   };
 
+  /* ── Reactivate ── */
   window.reactivateUser = async function(id) {
     try {
-      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
-      const u = rows[0]; if(!u) return;
-      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only reactivate Staff and Rider accounts.','error'); return; }
-      confirmAction('Reactivate User', `Reactivate ${u.first} ${u.last}? Their account access will be fully restored.`, async () => {
-        await sbQuery('users?id=eq.'+id, { method:'PATCH', body: JSON.stringify({ approved:true, deactivated:false }) });
-        showToast(`♻ ${u.first} ${u.last} has been reactivated and can sign in again.`, 'success');
+      const rows = await sbQuery('users?id=eq.' + id + '&select=first,last,role');
+      const u = rows[0]; if (!u) return;
+      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only reactivate Staff and Rider accounts.', 'error'); return; }
+      confirmAction('Reactivate Account', `Reactivate ${u.first} ${u.last}? Their full account access will be restored.`, async () => {
+        await sbQuery('users?id=eq.' + id, { method: 'PATCH', body: JSON.stringify({ approved: true, deactivated: false }) });
+        showToast(`♻ ${u.first} ${u.last} has been reactivated.`, 'success');
         buildPage();
       });
-    } catch(e) { showToast('Error: '+e.message,'error'); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
   };
 
+  /* ── Remove (Admin only) ── */
   window.removeUser = async function(id) {
+    if (!isAdmin) { showToast('🚫 Only Admins can permanently remove accounts.', 'error'); return; }
     try {
-      const rows = await sbQuery('users?id=eq.'+id+'&select=first,last,role');
-      const u = rows[0]; if(!u) return;
-      if (isManager && !['staff','rider'].includes(u.role)) { showToast('🚫 Managers can only remove Staff and Rider accounts.','error'); return; }
-      confirmAction('Remove User', `Permanently remove ${u.first} ${u.last} (${u.role})? This cannot be undone.`, async () => {
-        await sbQuery('users?id=eq.'+id, { method:'DELETE', prefer:'return=minimal' });
+      const rows = await sbQuery('users?id=eq.' + id + '&select=first,last,role');
+      const u = rows[0]; if (!u) return;
+      confirmAction('Permanently Remove Account', `Remove ${u.first} ${u.last} (${u.role}) permanently? This action cannot be undone.`, async () => {
+        await sbQuery('users?id=eq.' + id, { method: 'DELETE' });
         showToast(`🗑 ${u.first} ${u.last} has been permanently removed.`, 'success');
         buildPage();
       });
-    } catch(e) { showToast('Error: '+e.message,'error'); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
   };
 
   buildPage();
@@ -520,7 +733,7 @@ function renderRiderDeliveriesPage() {
   async function buildDeliveries() {
     pg.innerHTML = `
       <div class="ph"><h1>My Deliveries 🛵</h1></div>
-      <div style="max-width:860px;"><div style="text-align:center;padding:48px 0;color:var(--t2);">⏳ Loading deliveries…</div></div>`;
+      <div style="max-width:860px;"><div style="text-align:center;padding:48px 0;color:var(--t2);">⏳ Loading your deliveries…</div></div>`;
 
     let deliveries = [];
     try {
@@ -530,13 +743,11 @@ function renderRiderDeliveriesPage() {
         id:       r.order_id || ('#' + r.id),
         _supaId:  r.id,
         date:     r.date || r.created_at?.slice(0,10),
-        customer: r.customer || '—',
-        phone:    r.phone || '',
-        address:  r.address || '',
-        items:    r.items_summary || '',
-        total:    parseFloat(r.total) || 0,
-        status:   r.status || 'pending',
-        payment:  r.payment_method || '',
+        customer: r.customer || '',
+        phone:    r.phone    || '',
+        address:  r.address  || '',
+        notes:    r.notes    || '',
+        status:   r.status   || 'pending',
       }));
     } catch(e) {
       pg.innerHTML = `
@@ -546,23 +757,149 @@ function renderRiderDeliveriesPage() {
       return;
     }
 
-    const sc = { pending:'#F59E0B', processing:'#7C3AED', shipped:'#0284C7', delivered:'#22C55E', cancelled:'#EF4444' };
+    const active    = deliveries.filter(o => o.status === 'shipped');
+    const pending   = deliveries.filter(o => o.status === 'pending' || o.status === 'processing');
+    const done      = deliveries.filter(o => o.status === 'completed' || o.status === 'delivered');
+    const cancelled = deliveries.filter(o => o.status === 'cancelled' || o.status === 'rejected');
+
+    /* Status config */
+    const sc = {
+      pending:    { color:'#F59E0B', bg:'rgba(245,158,11,.12)',  label:'⏳ Assigned — Pending' },
+      processing: { color:'#7C3AED', bg:'rgba(124,58,237,.12)', label:'⚙️ Processing' },
+      shipped:    { color:'#0284C7', bg:'rgba(2,132,199,.12)',   label:'🚚 Out for Delivery' },
+      delivered:  { color:'#22C55E', bg:'rgba(34,197,94,.12)',   label:'📦 Delivered' },
+      completed:  { color:'#22C55E', bg:'rgba(34,197,94,.12)',   label:'✅ Completed' },
+      cancelled:  { color:'#EF4444', bg:'rgba(239,68,68,.12)',   label:'🚫 Cancelled' },
+      rejected:   { color:'#EF4444', bg:'rgba(239,68,68,.12)',   label:'❌ Rejected' },
+    };
+
+    function statusChip(status) {
+      const cfg = sc[status] || { color:'#888', bg:'rgba(128,128,128,.12)', label: cap(status) };
+      return `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:.72rem;font-weight:800;background:${cfg.bg};color:${cfg.color};white-space:nowrap;">${cfg.label}</span>`;
+    }
+
+    function deliveryCard(o) {
+      const isActive   = o.status === 'shipped';
+      const isPending  = o.status === 'pending' || o.status === 'processing';
+      const isDone     = o.status === 'completed' || o.status === 'delivered';
+      const isCancelled= o.status === 'cancelled' || o.status === 'rejected';
+      const border     = isActive  ? '2px solid #0284C7'
+                       : isPending ? '1.5px solid rgba(245,158,11,.4)'
+                       : isDone    ? '1.5px solid rgba(34,197,94,.3)'
+                       : '1.5px solid rgba(239,68,68,.25)';
+      const bgTop      = isActive  ? 'linear-gradient(135deg,rgba(2,132,199,.07),rgba(2,132,199,.02))'
+                       : 'var(--surface)';
+
+      return `
+      <div style="border:${border};border-radius:14px;overflow:hidden;margin-bottom:12px;${isActive?'box-shadow:0 4px 20px rgba(2,132,199,.12);':''}">
+        <!-- Card header -->
+        <div style="padding:13px 16px;background:${bgTop};display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--border);">
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${isActive ? `<div style="width:36px;height:36px;border-radius:10px;background:#0284C7;display:grid;place-items:center;flex-shrink:0;font-size:1.1rem;">🚚</div>`
+                       : isPending ? `<div style="width:36px;height:36px;border-radius:10px;background:#F59E0B;display:grid;place-items:center;flex-shrink:0;font-size:1.1rem;">📋</div>`
+                       : isDone    ? `<div style="width:36px;height:36px;border-radius:10px;background:#059669;display:grid;place-items:center;flex-shrink:0;font-size:1.1rem;">✅</div>`
+                       : `<div style="width:36px;height:36px;border-radius:10px;background:#EF4444;display:grid;place-items:center;flex-shrink:0;font-size:1.1rem;">❌</div>`}
+            <div>
+              <div style="font-weight:800;font-size:.88rem;color:var(--brand);letter-spacing:-.01em;">${o.id}</div>
+              <div style="font-size:.7rem;color:var(--t2);margin-top:1px;">📅 Assigned: ${fmtDate(o.date)}</div>
+            </div>
+          </div>
+          ${statusChip(o.status)}
+        </div>
+
+        <!-- Delivery address — main info for rider -->
+        <div style="padding:14px 16px;">
+
+          <!-- Customer contact info — visible to rider for easy communication -->
+          ${(o.customer || o.phone) ? `
+          <div style="margin-bottom:12px;padding:10px 13px;background:rgba(124,58,237,.07);border:1px solid rgba(124,58,237,.2);border-radius:10px;">
+            <div style="font-size:.6rem;font-weight:800;color:#A78BFA;text-transform:uppercase;letter-spacing:.09em;margin-bottom:6px;">👤 Customer Contact</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <div>
+                ${o.customer ? `<div style="font-size:.88rem;font-weight:700;color:var(--t1);">${o.customer}</div>` : ''}
+                ${o.phone ? `<div style="font-size:.78rem;font-weight:600;color:var(--t2);margin-top:2px;">📞 ${o.phone}</div>` : ''}
+              </div>
+              ${o.phone ? `<a href="tel:${o.phone}" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:8px;background:#7C3AED;color:#fff;font-size:.74rem;font-weight:800;text-decoration:none;flex-shrink:0;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.41 2 2 0 0 1 3.6 1.24h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.82a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                Call
+              </a>` : ''}
+            </div>
+          </div>` : ''}
+
+          <div style="font-size:.62rem;font-weight:800;color:var(--t3);text-transform:uppercase;letter-spacing:.09em;margin-bottom:6px;">📍 Delivery Address</div>
+          ${o.address
+            ? `<div style="font-size:.9rem;font-weight:700;color:var(--t1);line-height:1.5;">${o.address}</div>
+               <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.address)}" target="_blank"
+                 style="display:inline-flex;align-items:center;gap:5px;margin-top:8px;font-size:.72rem;font-weight:700;color:#0284C7;text-decoration:none;padding:4px 10px;border:1px solid rgba(2,132,199,.3);border-radius:6px;background:rgba(2,132,199,.06);">
+                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                 Open in Maps
+               </a>`
+            : `<div style="font-size:.85rem;color:var(--t3);font-style:italic;">No delivery address provided.</div>`}
+
+          ${o.notes ? `
+            <div style="margin-top:12px;padding:9px 12px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.2);border-radius:8px;">
+              <div style="font-size:.6rem;font-weight:800;color:#F59E0B;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;">📝 Delivery Note</div>
+              <div style="font-size:.8rem;color:var(--t2);font-style:italic;">${o.notes}</div>
+            </div>` : ''}
+
+          <!-- Action buttons -->
+          ${!isDone && !isCancelled ? `
+          <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+            ${isPending ? `
+            <button onclick="markShipped('${o.id}',${o._supaId},event.currentTarget)"
+              style="flex:1;min-width:140px;padding:10px 16px;border-radius:10px;border:none;background:#0284C7;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8z"/></svg>
+              Start Delivery
+            </button>
+            <button onclick="markRejected('${o.id}',${o._supaId},event.currentTarget)"
+              style="padding:10px 14px;border-radius:10px;border:1.5px solid rgba(239,68,68,.4);background:rgba(239,68,68,.07);color:#FCA5A5;font-size:.82rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Reject
+            </button>
+            ` : `
+            <button onclick="markDelivered('${o.id}',${o._supaId},event.currentTarget)"
+              style="flex:1;min-width:140px;padding:10px 16px;border-radius:10px;border:none;background:#059669;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              Mark as Delivered
+            </button>
+            <button onclick="markRejected('${o.id}',${o._supaId},event.currentTarget)"
+              style="padding:10px 14px;border-radius:10px;border:1.5px solid rgba(239,68,68,.4);background:rgba(239,68,68,.07);color:#FCA5A5;font-size:.82rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Reject
+            </button>
+            `}
+          </div>` : `
+          <div style="margin-top:12px;display:flex;align-items:center;gap:7px;font-size:.78rem;font-weight:800;color:${isDone?'#22C55E':'#EF4444'};">
+            ${isDone ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Delivery completed'
+                     : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> ' + cap(o.status)}
+          </div>`}
+        </div>
+      </div>`;
+    }
 
     pg.innerHTML = `
-      <div class="ph"><h1>My Deliveries 🛵</h1></div>
-      <div style="max-width:860px;">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px;">
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;">
-            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Assigned</div>
-            <div style="font-size:1.6rem;font-weight:800;color:#F59E0B;">${deliveries.filter(o=>o.status==='pending'||o.status==='processing').length}</div>
+      <div class="ph">
+        <div><h1>My Deliveries 🛵</h1><p class="ph-sub">Customer contact details shown for each delivery.</p></div>
+      </div>
+      <div style="max-width:680px;">
+
+        <!-- KPI Summary Strip -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:24px;">
+          <div style="background:var(--surface);border:1px solid rgba(245,158,11,.3);border-radius:12px;padding:14px 12px;text-align:center;">
+            <div style="font-size:.6rem;color:var(--t2);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Assigned</div>
+            <div style="font-size:1.7rem;font-weight:800;color:#F59E0B;line-height:1;">${pending.length}</div>
           </div>
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;">
-            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Out for Delivery</div>
-            <div style="font-size:1.6rem;font-weight:800;color:#0284C7;">${deliveries.filter(o=>o.status==='shipped').length}</div>
+          <div style="background:var(--surface);border:1px solid rgba(2,132,199,.3);border-radius:12px;padding:14px 12px;text-align:center;">
+            <div style="font-size:.6rem;color:var(--t2);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Active</div>
+            <div style="font-size:1.7rem;font-weight:800;color:#0284C7;line-height:1;">${active.length}</div>
           </div>
-          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;">
-            <div style="font-size:.72rem;color:var(--t2);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Delivered</div>
-            <div style="font-size:1.6rem;font-weight:800;color:#22C55E;">${deliveries.filter(o=>o.status==='delivered').length}</div>
+          <div style="background:var(--surface);border:1px solid rgba(34,197,94,.3);border-radius:12px;padding:14px 12px;text-align:center;">
+            <div style="font-size:.6rem;color:var(--t2);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Delivered</div>
+            <div style="font-size:1.7rem;font-weight:800;color:#22C55E;line-height:1;">${done.length}</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px 12px;text-align:center;">
+            <div style="font-size:.6rem;color:var(--t2);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px;">Cancelled</div>
+            <div style="font-size:1.7rem;font-weight:800;color:#EF4444;line-height:1;">${cancelled.length}</div>
           </div>
         </div>
 
@@ -570,45 +907,24 @@ function renderRiderDeliveriesPage() {
           ? `<div class="blank-page">
                <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8z"/></svg>
                <h2>No Deliveries Assigned</h2>
-               <p>No orders have been assigned to you yet. An Admin or Manager will assign deliveries to you.</p>
+               <p>No orders have been assigned to you yet.<br/>An Admin or Manager will assign deliveries to you.</p>
              </div>`
-          : `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;">
-               <div style="padding:12px 18px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1.6fr 1fr 1fr 1fr auto;gap:10px;font-size:.7rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;">
-                 <span>Order ID</span><span>Customer</span><span>Date</span><span>Total</span><span>Status</span><span>Action</span>
-               </div>
-               ${deliveries.map(o => `
-               <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:1fr 1.6fr 1fr 1fr 1fr auto;gap:10px;align-items:center;font-size:.83rem;">
-                 <div>
-                   <div style="font-weight:700;color:var(--brand);font-size:.82rem;">${o.id}</div>
-                   ${o.phone ? `<div style="font-size:.7rem;color:var(--t2);">${o.phone}</div>` : ''}
-                 </div>
-                 <div>
-                   <div style="color:var(--t1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.customer}</div>
-                   ${o.address ? `<div style="font-size:.7rem;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${o.address}">${o.address}</div>` : ''}
-                 </div>
-                 <span style="color:var(--t2);font-size:.78rem;">${o.date || '—'}</span>
-                 <span style="font-weight:700;color:var(--brand);">₦${o.total.toLocaleString()}</span>
-                 <span style="padding:3px 10px;border-radius:20px;font-size:.7rem;font-weight:700;background:${sc[o.status]||'#888'}22;color:${sc[o.status]||'#888'};text-transform:capitalize;white-space:nowrap;">${o.status}</span>
-                 <div style="display:flex;gap:6px;">
-                   ${o.status === 'completed' || o.status === 'rejected' || o.status === 'cancelled'
-                     ? `<span style="font-size:.72rem;color:${o.status==='completed'?'#22C55E':'#EF4444'};font-weight:700;">
-                          ${o.status==='completed'?'✅ Done':'❌ '+cap(o.status)}
-                        </span>`
-                     : `<button onclick="markDelivered('${o.id}',${o._supaId},this)"
-                           style="padding:5px 10px;border-radius:8px;border:none;background:#059669;color:#fff;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
-                           ✓ Delivered
-                         </button>
-                        <button onclick="markRejected('${o.id}',${o._supaId},this)"
-                           style="padding:5px 10px;border-radius:8px;border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.1);color:#FCA5A5;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap;">
-                           ✕ Reject
-                         </button>`
-                   }
-                 </div>
-               </div>`).join('')}
+          : `<div>
+              ${active.length ? `<div style="font-size:.7rem;font-weight:800;color:#0284C7;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#0284C7;display:inline-block;"></span>Active Delivery</div>
+              ${active.map(deliveryCard).join('')}` : ''}
+
+              ${pending.length ? `<div style="font-size:.7rem;font-weight:800;color:#F59E0B;text-transform:uppercase;letter-spacing:.08em;margin-top:${active.length?16:0}px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#F59E0B;display:inline-block;"></span>Assigned — Awaiting Pickup</div>
+              ${pending.map(deliveryCard).join('')}` : ''}
+
+              ${done.length ? `<div style="font-size:.7rem;font-weight:800;color:#22C55E;text-transform:uppercase;letter-spacing:.08em;margin-top:16px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#22C55E;display:inline-block;"></span>Completed</div>
+              ${done.map(deliveryCard).join('')}` : ''}
+
+              ${cancelled.length ? `<div style="font-size:.7rem;font-weight:800;color:#EF4444;text-transform:uppercase;letter-spacing:.08em;margin-top:16px;margin-bottom:10px;display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#EF4444;display:inline-block;"></span>Cancelled / Rejected</div>
+              ${cancelled.map(deliveryCard).join('')}` : ''}
              </div>`
         }
 
-        <div style="margin-top:14px;text-align:right;">
+        <div style="margin-top:16px;text-align:right;">
           <button onclick="renderRiderDeliveriesPage()" class="btn-ghost sm">🔄 Refresh</button>
         </div>
       </div>`;
@@ -617,9 +933,11 @@ function renderRiderDeliveriesPage() {
   buildDeliveries();
 }
 
-/* ── Rider: mark order as delivered (defined globally so onclick always finds it) ── */
-window.markDelivered = async function(orderId, supaId, btn) {
-  if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
+/* ── Rider: mark order as delivered ── */
+window.markDelivered = async function(orderId, supaId, btnEl) {
+  /* Capture the button reference immediately and defensively */
+  const btn = (btnEl && btnEl.nodeType === 1) ? btnEl : null;
+  if (btn) { btn.innerHTML = '⏳ Updating…'; btn.disabled = true; }
   try {
     await sbQuery('orders?id=eq.' + supaId, {
       method: 'PATCH',
@@ -633,16 +951,42 @@ window.markDelivered = async function(orderId, supaId, btn) {
     const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
     pushNotif('📦 Order ' + orderId + ' delivered by ' + riderName + ' — automatically marked ✅ Completed. Balance updated.');
     showToast('📦 Order ' + orderId + ' delivered and completed!', 'success');
-    renderRiderDeliveriesPage();
+    renderRiderDeliveriesPage(); /* re-renders the whole page — btn ref intentionally discarded */
   } catch(e) {
-    if (btn) { btn.textContent = '✓ Delivered'; btn.disabled = false; }
+    /* btn may be detached from DOM after re-render — only restore if still connected */
+    if (btn && btn.isConnected) { btn.innerHTML = '✓ Mark as Delivered'; btn.disabled = false; }
     showToast('Error updating order: ' + e.message, 'error');
   }
 };
 
-/* ── Rider: mark order as rejected (defined globally so onclick always finds it) ── */
-window.markRejected = async function(orderId, supaId, btn) {
-  if (btn) { btn.textContent = '⏳…'; btn.disabled = true; }
+/* ── Rider: set status to "shipped" / start delivery ── */
+window.markShipped = async function(orderId, supaId, btnEl) {
+  const btn = (btnEl && btnEl.nodeType === 1) ? btnEl : null;
+  if (btn) { btn.innerHTML = '⏳ Updating…'; btn.disabled = true; }
+  try {
+    await sbQuery('orders?id=eq.' + supaId, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'shipped', rider_status: 'on_delivery' }),
+    });
+    const o = ORDERS_DB.find(x => x.id === orderId);
+    if (o) {
+      o.status = 'shipped'; o.rider_status = 'on_delivery';
+      saveToStorage(); refreshDashboardKPIs(); renderOrdersTable();
+    }
+    const riderName = CURRENT_USER ? CURRENT_USER.name : 'Rider';
+    pushNotif('🚚 Order ' + orderId + ' — ' + riderName + ' is out for delivery.');
+    showToast('🚚 Order ' + orderId + ' — you are now out for delivery!', 'success');
+    renderRiderDeliveriesPage();
+  } catch(e) {
+    if (btn && btn.isConnected) { btn.innerHTML = '🚴 Start Delivery'; btn.disabled = false; }
+    showToast('Error updating order: ' + e.message, 'error');
+  }
+};
+
+/* ── Rider: mark order as rejected ── */
+window.markRejected = async function(orderId, supaId, btnEl) {
+  const btn = (btnEl && btnEl.nodeType === 1) ? btnEl : null;
+  if (btn) { btn.innerHTML = '⏳ Updating…'; btn.disabled = true; }
   try {
     await sbQuery('orders?id=eq.' + supaId, {
       method: 'PATCH',
@@ -658,10 +1002,328 @@ window.markRejected = async function(orderId, supaId, btn) {
     showToast('Order ' + orderId + ' marked as Rejected.', 'warning');
     renderRiderDeliveriesPage();
   } catch(e) {
-    if (btn) { btn.textContent = '✕ Reject'; btn.disabled = false; }
+    if (btn && btn.isConnected) { btn.innerHTML = '✕ Reject'; btn.disabled = false; }
     showToast('Error updating order: ' + e.message, 'error');
   }
 };
+
+/* ══════════════════════════════════════
+   CUSTOMERS PAGE
+   Derived from ORDERS_DB — unique customers
+   with order history, totals, contact info.
+══════════════════════════════════════ */
+function renderCustomersPage() {
+  const pg = document.getElementById('page-customers');
+  if (!pg) return;
+
+  const sym = currencySymbol;
+
+  /* Build a map: customerName (lowercase) → aggregated data */
+  function buildCustomerMap() {
+    const map = {};
+    ORDERS_DB.forEach(o => {
+      const key = (o.customer || '').trim().toLowerCase();
+      if (!key) return;
+      if (!map[key]) {
+        map[key] = {
+          name:      o.customer,
+          phone:     o.phone    || '',
+          email:     o.email    || '',
+          address:   o.address  || '',
+          orders:    0,
+          spent:     0,
+          lastDate:  '',
+          statuses:  [],
+        };
+      }
+      const c = map[key];
+      c.orders++;
+      c.spent += (parseFloat(o.total) || 0);
+      if (!c.phone && o.phone)     c.phone   = o.phone;
+      if (!c.email && o.email)     c.email   = o.email;
+      if (!c.address && o.address) c.address = o.address;
+      if (!c.lastDate || o.date > c.lastDate) c.lastDate = o.date;
+      c.statuses.push(o.status);
+    });
+    return Object.values(map).sort((a, b) => b.spent - a.spent);
+  }
+
+  function renderTable(customers) {
+    const tbody   = document.getElementById('custTbody');
+    const info    = document.getElementById('custInfo');
+    const kpiTot  = document.getElementById('custKpiTotal');
+    const kpiPh   = document.getElementById('custKpiPhone');
+    const kpiRep  = document.getElementById('custKpiRepeat');
+    const kpiRev  = document.getElementById('custKpiRevenue');
+
+    if (kpiTot) kpiTot.textContent = customers.length;
+    if (kpiPh)  kpiPh.textContent  = customers.filter(c => c.phone).length;
+    if (kpiRep) kpiRep.textContent = customers.filter(c => c.orders >= 2).length;
+    if (kpiRev) kpiRev.textContent = sym + customers.reduce((s, c) => s + c.spent, 0)
+                                         .toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    if (!tbody || !info) return;
+
+    if (!customers.length) {
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+        <h4>No customers yet</h4>
+        <p>Customers will appear here as you add orders.</p>
+      </div></td></tr>`;
+      info.textContent = 'No customers yet';
+      return;
+    }
+
+    tbody.innerHTML = customers.map((c, idx) => {
+      const hasCompleted = c.statuses.some(s => ['completed','delivered','paid'].includes(s));
+      const allCancelled = c.statuses.every(s => ['cancelled','rejected'].includes(s));
+      const statusBadge = allCancelled
+        ? `<span class="badge cancelled" style="font-size:.68rem;">🚫 All Cancelled</span>`
+        : hasCompleted
+          ? `<span class="badge completed" style="font-size:.68rem;">✅ Active</span>`
+          : `<span class="badge pending" style="font-size:.68rem;">⏳ Pending</span>`;
+
+      const initials = c.name.split(' ').map(w => w[0] || '').join('').slice(0,2).toUpperCase();
+      const avatarColors = ['#E8441A','#7C3AED','#0284C7','#059669','#D97706','#DB2777'];
+      const avatarBg = avatarColors[idx % avatarColors.length];
+
+      return `<tr>
+        <td>
+          <div style="width:36px;height:36px;border-radius:50%;background:${avatarBg};display:grid;place-items:center;font-size:.75rem;font-weight:800;color:#fff;flex-shrink:0;">${initials}</div>
+        </td>
+        <td>
+          <div style="font-weight:700;font-size:.88rem;color:var(--t1);">${c.name}</div>
+          ${c.email ? `<div style="font-size:.7rem;color:var(--t3);">✉️ ${c.email}</div>` : ''}
+        </td>
+        <td>
+          ${c.phone
+            ? `<div style="font-size:.84rem;font-weight:600;color:var(--t1);">${c.phone}</div>
+               <a href="tel:${c.phone}" style="display:inline-flex;align-items:center;gap:4px;margin-top:3px;font-size:.68rem;font-weight:700;color:#0284C7;text-decoration:none;padding:2px 8px;border:1px solid rgba(2,132,199,.25);border-radius:5px;background:rgba(2,132,199,.06);">
+                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.07 4.18 2 2 0 0 1 5.06 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.06 9.91a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                 Call
+               </a>`
+            : `<span style="color:var(--t3);font-size:.78rem;">—</span>`}
+        </td>
+        <td style="max-width:160px;">
+          ${c.address
+            ? `<div style="font-size:.78rem;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${c.address}">📍 ${c.address}</div>`
+            : `<span style="color:var(--t3);font-size:.78rem;">—</span>`}
+        </td>
+        <td>
+          <div style="font-size:1rem;font-weight:800;color:var(--t1);">${c.orders}</div>
+          <div style="font-size:.67rem;color:var(--t3);">order${c.orders !== 1 ? 's' : ''}</div>
+        </td>
+        <td style="font-weight:800;color:var(--brand);font-size:.9rem;">${sym}${c.spent.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+        <td style="font-size:.78rem;color:var(--t2);">${fmtDate(c.lastDate)}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join('');
+
+    info.textContent = `${customers.length} customer${customers.length !== 1 ? 's' : ''}`;
+  }
+
+  /* Initial render */
+  renderTable(buildCustomerMap());
+
+  /* Search handler */
+  const searchEl = document.getElementById('custSearch');
+  if (searchEl) {
+    searchEl.oninput = function() {
+      const q = this.value.trim().toLowerCase();
+      const all = buildCustomerMap();
+      const filtered = q ? all.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.phone.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
+        c.address.toLowerCase().includes(q)
+      ) : all;
+      renderTable(filtered);
+    };
+  }
+}
+/* Re-render customers page whenever orders update */
+function refreshCustomersPage() {
+  if (CURRENT_USER && can('viewCustomers')) renderCustomersPage();
+}
+window.refreshCustomersPage = refreshCustomersPage;
+
+/* ══════════════════════════════════════════════════════════
+   PERMISSIONS PAGE
+   Admin  → can configure: manager, staff, rider
+   Manager → can configure: staff, rider only
+   Permissions stored in localStorage per role key.
+   At runtime can() reads these overrides first.
+══════════════════════════════════════════════════════════ */
+function renderPermissionsPage() {
+  const pg = document.getElementById('page-permissions');
+  if (!pg) return;
+
+  const isAdmin   = CURRENT_USER && CURRENT_USER.role === 'admin';
+  const isManager = CURRENT_USER && CURRENT_USER.role === 'manager';
+
+  /* The full permission action list with human labels and groupings */
+  const PERM_GROUPS = [
+    {
+      group: 'Orders',
+      icon: '📦',
+      items: [
+        { key:'addOrder',     label:'Add Order',              adminOnly:false },
+        { key:'editOrder',    label:'Edit / Update Order',    adminOnly:false },
+        { key:'deleteOrder',  label:'Delete Order',           adminOnly:false },
+        { key:'assignRider',  label:'Assign Rider to Order',  adminOnly:false },
+      ],
+    },
+    {
+      group: 'Inventory',
+      icon: '🏪',
+      items: [
+        { key:'viewInventory',   label:'View Inventory',    adminOnly:false },
+        { key:'addProduct',      label:'Add Product',       adminOnly:false },
+        { key:'editProduct',     label:'Edit Product',      adminOnly:false },
+        { key:'restockProduct',  label:'Restock Product',   adminOnly:false },
+        { key:'deleteProduct',   label:'Delete Product',    adminOnly:false },
+        { key:'exportCSV',       label:'Export CSV',        adminOnly:false },
+      ],
+    },
+    {
+      group: 'Insights',
+      icon: '📊',
+      items: [
+        { key:'viewAnalytics',  label:'View Analytics',   adminOnly:false },
+        { key:'viewCustomers',  label:'View Customers',   adminOnly:false },
+        { key:'viewDiscounts',  label:'View Discounts',   adminOnly:false },
+        { key:'viewStore',      label:'View Store',       adminOnly:false },
+      ],
+    },
+    {
+      group: 'Team',
+      icon: '👥',
+      items: [
+        { key:'viewUserManagement', label:'View User Management', adminOnly:false },
+        { key:'approveUsers',       label:'Approve Users',        adminOnly:false },
+      ],
+    },
+  ];
+
+  /* Roles this user can configure */
+  const configurableRoles = isAdmin ? ['manager','staff','rider'] : ['staff','rider'];
+
+  const roleColor = { manager:'#7C3AED', staff:'#0284C7', rider:'#059669' };
+  const roleIcon  = { manager:'📊', staff:'🧑‍💼', rider:'🛵' };
+
+  /* Load current effective permissions for a role */
+  function getEffective(role) {
+    const defaults = PERMISSIONS[role] || {};
+    const customKey = 'finexy_permissions_' + role;
+    const saved = localStorage.getItem(customKey);
+    if (saved) {
+      try { return { ...defaults, ...JSON.parse(saved) }; } catch(e) {}
+    }
+    return { ...defaults };
+  }
+
+  /* Save permissions for a role */
+  function savePermissions(role) {
+    const current = getEffective(role);
+    const allKeys = PERM_GROUPS.flatMap(g => g.items.map(i => i.key));
+    allKeys.forEach(key => {
+      const cb = document.getElementById(`perm_${role}_${key}`);
+      if (cb) current[key] = cb.checked;
+    });
+    localStorage.setItem('finexy_permissions_' + role, JSON.stringify(current));
+    showToast(`✅ Permissions saved for ${cap(role)}.`, 'success');
+    pushNotif(`🔐 Permissions updated for ${cap(role)} by ${CURRENT_USER.name}.`);
+  }
+
+  /* Reset role to defaults */
+  function resetPermissions(role) {
+    localStorage.removeItem('finexy_permissions_' + role);
+    const allKeys = PERM_GROUPS.flatMap(g => g.items.map(i => i.key));
+    allKeys.forEach(key => {
+      const cb = document.getElementById(`perm_${role}_${key}`);
+      if (cb) cb.checked = PERMISSIONS[role][key] === true;
+    });
+    showToast(`♻ ${cap(role)} permissions reset to defaults.`, 'success');
+  }
+
+  /* Build permission toggle card for one role */
+  function roleCard(role) {
+    const eff   = getEffective(role);
+    const color = roleColor[role] || '#888';
+    const icon  = roleIcon[role]  || '👤';
+    const isRider = role === 'rider';
+
+    const groupsHTML = PERM_GROUPS.map(g => {
+      /* Riders only have delivery actions — hide irrelevant groups */
+      const items = isRider ? [] : g.items;
+      if (isRider) return '';  /* Riders have fixed delivery perms — show note instead */
+
+      return `
+        <div style="margin-bottom:18px;">
+          <div style="font-size:.68rem;font-weight:800;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            ${g.icon} ${g.group}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            ${items.map(item => `
+              <label style="display:flex;align-items:center;gap:9px;padding:9px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer;background:var(--bg);transition:border-color .12s;" class="perm-row" for="perm_${role}_${item.key}">
+                <input type="checkbox" id="perm_${role}_${item.key}" ${eff[item.key] ? 'checked' : ''} style="width:15px;height:15px;accent-color:${color};flex-shrink:0;cursor:pointer;"/>
+                <span style="font-size:.79rem;font-weight:500;color:var(--t1);line-height:1.3;">${item.label}</span>
+              </label>`).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    const riderNote = isRider ? `
+      <div style="padding:16px;background:rgba(5,150,105,.07);border:1px solid rgba(5,150,105,.18);border-radius:10px;font-size:.82rem;color:#6EE7B7;line-height:1.6;">
+        🛵 <strong>Riders</strong> have fixed permissions — they can only view and update their own assigned deliveries. This cannot be changed to maintain delivery integrity.
+      </div>` : '';
+
+    return `
+      <div class="card" style="margin-bottom:20px;" id="permCard_${role}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;height:40px;border-radius:12px;background:${color}22;border:2px solid ${color}44;display:grid;place-items:center;font-size:1.1rem;">${icon}</div>
+            <div>
+              <div style="font-family:'Syne',sans-serif;font-size:1rem;font-weight:800;color:var(--t1);">${cap(role)}</div>
+              <div style="font-size:.72rem;color:var(--t2);margin-top:1px;">Configure what ${cap(role)}s can access</div>
+            </div>
+          </div>
+          ${!isRider ? `
+          <div style="display:flex;gap:8px;">
+            <button onclick="resetRolePerms('${role}')" style="padding:7px 14px;border-radius:8px;border:1px solid var(--border2);background:var(--bg);color:var(--t2);font-size:.76rem;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">♻ Reset Defaults</button>
+            <button onclick="saveRolePerms('${role}')" style="padding:7px 16px;border-radius:8px;border:none;background:${color};color:#fff;font-size:.76rem;font-weight:800;cursor:pointer;font-family:'DM Sans',sans-serif;box-shadow:0 2px 10px ${color}44;">💾 Save</button>
+          </div>` : ''}
+        </div>
+        ${riderNote}
+        ${groupsHTML}
+      </div>`;
+  }
+
+  pg.innerHTML = `
+    <div class="ph" style="align-items:flex-start;">
+      <div>
+        <h1>Permissions 🔐</h1>
+        <p class="ph-sub">Configure role access. Changes take effect immediately for all logged-in users of that role.</p>
+      </div>
+    </div>
+
+    <div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.18);border-radius:10px;padding:12px 16px;font-size:.78rem;color:#FDBA74;margin-bottom:24px;display:flex;gap:10px;align-items:flex-start;max-width:860px;">
+      ⚠️ <div><strong>Heads up:</strong> Permissions are stored locally in each browser session. ${isAdmin ? 'Admin permissions are always fixed and cannot be changed.' : 'As Manager, you can only configure Staff and Rider permissions.'}</div>
+    </div>
+
+    <div style="max-width:860px;">
+      ${configurableRoles.map(r => roleCard(r)).join('')}
+    </div>`;
+
+  /* Expose save/reset to inline onclick */
+  window.saveRolePerms  = savePermissions;
+  window.resetRolePerms = function(role) {
+    confirmAction('Reset Permissions', `Reset ${cap(role)} permissions back to defaults? Any custom changes will be lost.`, () => {
+      resetPermissions(role);
+    });
+  };
+}
+window.renderPermissionsPage = renderPermissionsPage;
 
 window.saveSettings = async function() {
   if (!CURRENT_USER) return;
@@ -855,6 +1517,7 @@ async function loadOrdersFromSupabase() {
     saveToStorage();
     renderOrdersTable();
     refreshDashboardKPIs();
+    refreshCustomersPage();
   } catch(e) {
     console.warn('[Finexy] Could not load orders from Supabase:', e);
   }
@@ -988,6 +1651,7 @@ const PAGE_PERMS = {
   discounts:        'viewDiscounts',
   store:            'viewStore',
   'user-management':'viewUserManagement',
+  'permissions':    'viewUserManagement',
 };
 
 function navigateTo(page) {
@@ -1027,6 +1691,26 @@ window.navigateTo = navigateTo;
    TOPBAR
 ══════════════════════ */
 function initTopbar() {
+  /* ── Dark / Light mode toggle ── */
+  const themeToggle = document.getElementById('themeToggle');
+  const themeIcon   = document.getElementById('themeIcon');
+  const SUN_SVG  = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+  const MOON_SVG = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+
+  function applyTheme(dark) {
+    document.body.classList.toggle('dark', dark);
+    if (themeIcon) themeIcon.innerHTML = dark ? SUN_SVG : MOON_SVG;
+    localStorage.setItem('finexy_theme', dark ? 'dark' : 'light');
+  }
+  /* Restore saved preference */
+  const savedTheme = localStorage.getItem('finexy_theme');
+  applyTheme(savedTheme === 'dark');
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      applyTheme(!document.body.classList.contains('dark'));
+    });
+  }
   document.getElementById('topSearch').addEventListener('input', e => {
     const q = e.target.value.trim().toLowerCase();
     S.orderSearch = q;
@@ -1100,20 +1784,22 @@ function updatePip() {
    DASHBOARD KPIs
 ══════════════════════ */
 function refreshDashboardKPIs() {
-  const sym = currencySymbol;
-  /* Total orders */
-  document.getElementById('kpiSales').textContent = ORDERS_DB.length;
-  /* Unique customers */
+  /* Riders land on page-deliveries — KPI elements do not exist there. Guard every access. */
+  const sym        = currencySymbol;
+  const elSales    = document.getElementById('kpiSales');
+  const elCustomers= document.getElementById('kpiCustomers');
+  const elReturns  = document.getElementById('kpiReturns');
+  const elRevenue  = document.getElementById('kpiRevenue');
+  if (!elSales && !elCustomers && !elReturns && !elRevenue) return;
+  if (elSales)     elSales.textContent = ORDERS_DB.length;
   const unique = new Set(ORDERS_DB.filter(o=>o.customer).map(o => o.customer.toLowerCase())).size;
-  document.getElementById('kpiCustomers').textContent = unique;
-  /* Rejected + cancelled orders */
+  if (elCustomers) elCustomers.textContent = unique;
   const rejected = ORDERS_DB.filter(o => o.status === 'cancelled' || o.status === 'rejected').length;
-  document.getElementById('kpiReturns').textContent = rejected;
-  /* Revenue = completed + delivered (rider marked done, auto-completed) + paid online */
+  if (elReturns)   elReturns.textContent = rejected;
   const revenue = ORDERS_DB
     .filter(o => ['completed','delivered','paid'].includes(o.status))
     .reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
-  document.getElementById('kpiRevenue').textContent = sym + revenue.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (elRevenue)   elRevenue.textContent = sym + revenue.toLocaleString('en-NG', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
 /* ══════════════════════
@@ -1199,11 +1885,13 @@ function currentOrderPage() {
 function renderOrdersTable() {
   const tbody = document.getElementById('ordersTbody');
   const info  = document.getElementById('tblInfo');
+  /* Rider page has no orders table — bail out silently */
+  if (!tbody || !info) return;
   const rows  = currentOrderPage();
 
   if (!ORDERS_DB.length) {
     tbody.innerHTML = `
-      <tr><td colspan="9">
+      <tr><td colspan="7">
         <div class="empty-state">
           <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           <h4>No orders yet</h4>
@@ -1215,7 +1903,7 @@ function renderOrdersTable() {
     return;
   }
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:36px;color:var(--t3)">No results match your search.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:36px;color:var(--t3)">No results match your search.</td></tr>`;
     info.textContent = '0 results';
     document.getElementById('pager').innerHTML = '';
     return;
@@ -1224,31 +1912,52 @@ function renderOrdersTable() {
   const sym = currencySymbol;
   const canEdit   = can('editOrder');
   const canDelete = can('deleteOrder');
+
+  /* ── Parse items_summary into a short readable list ── */
+  function fmtItemsSummary(summary) {
+    if (!summary) return '<span style="color:var(--t3)">—</span>';
+    const parts = summary.split(/,(?![^\[]*\])/);
+    const lines = parts.map(part => {
+      part = part.trim();
+      const qtyMatch = part.match(/\(x(\d+)\)\s*$/);
+      const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+      const namePart = part.replace(/\(x\d+\)\s*$/, '').replace(/\s*\[.*?\]\s*$/, '').trim();
+      return namePart ? `<span style="display:inline-flex;align-items:center;gap:4px;margin-bottom:3px;">
+        <span style="font-size:.62rem;font-weight:800;background:rgba(232,68,26,.13);color:var(--brand);border-radius:4px;padding:1px 5px;flex-shrink:0;">×${qty}</span>
+        <span style="font-weight:600;color:var(--t1);font-size:.8rem;">${namePart}</span>
+      </span>` : null;
+    }).filter(Boolean);
+    return `<div style="display:flex;flex-direction:column;gap:1px;">${lines.join('')}</div>`;
+  }
+
   tbody.innerHTML = rows.map(o => `
     <tr class="${S.orderSelected.has(o.id) ? 'row-selected' : ''}">
       <td><input type="checkbox" class="o-chk" data-id="${o.id}" ${S.orderSelected.has(o.id)?'checked':''}/></td>
-      <td style="font-weight:700;color:var(--brand);">
-        ${o.id}
-        ${o._fromStore ? `<span style="font-size:.58rem;background:#059669;color:#fff;padding:1px 5px;border-radius:4px;display:inline-block;margin-left:4px;vertical-align:middle;">STORE</span>` : ''}
-      </td>
-      <td>${fmtDate(o.date)}</td>
       <td>
-        <div style="font-weight:600;font-size:.84rem;">${o.customer}</div>
-        ${o.phone ? `<div style="font-size:.7rem;color:var(--t2);">${o.phone}</div>` : ''}
+        <div style="font-weight:800;color:var(--brand);font-size:.84rem;letter-spacing:-.01em;">${o.id}</div>
+        ${o._fromStore ? `<span style="font-size:.58rem;background:#059669;color:#fff;padding:1px 5px;border-radius:4px;display:inline-block;margin-top:2px;">STORE</span>` : ''}
+        <div style="font-size:.68rem;color:var(--t3);margin-top:2px;">${fmtDate(o.date)}</div>
       </td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8rem;" title="${o.category}">${o.category}</td>
+      <td>
+        <div style="font-weight:700;font-size:.85rem;color:var(--t1);">${o.customer}</div>
+        ${o.phone ? `<div style="font-size:.7rem;color:var(--t2);margin-top:1px;">📞 ${o.phone}</div>` : ''}
+        ${o.address ? `<div style="font-size:.68rem;color:var(--t3);margin-top:1px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${o.address}">📍 ${o.address}</div>` : ''}
+      </td>
+      <td style="max-width:200px;">
+        ${fmtItemsSummary(o.category)}
+        <div style="font-size:.67rem;color:var(--t3);margin-top:3px;">${o.items} item${o.items!==1?'s':''}</div>
+      </td>
       <td>
         <span class="badge ${o.status}">${statusLabel(o)}</span>
-        ${o.payment_method ? `<div style="font-size:.65rem;color:var(--t2);margin-top:3px;">${o.payment_method}</div>` : ''}
-        ${o.rider_name ? `<div style="font-size:.65rem;color:#34D399;margin-top:2px;">🛵 ${o.rider_name}</div>` : ''}
+        ${o.payment_method ? `<div style="font-size:.63rem;color:var(--t2);margin-top:4px;">${o.payment_method==='Pay on Delivery'?'💵':o.payment_method==='Pay Online'||o.payment_method==='Bank Transfer'?'🏦':'💳'} ${o.payment_method}</div>` : ''}
+        ${o.rider_name ? `<div style="font-size:.65rem;color:#34D399;margin-top:3px;font-weight:700;">🛵 ${o.rider_name}</div>` : ''}
       </td>
-      <td>${o.items} item${o.items !== 1 ? 's':''}</td>
-      <td style="font-weight:700">${sym}${o.total.toFixed(2)}</td>
+      <td style="font-weight:800;font-size:.92rem;color:var(--t1);">${sym}${o.total.toLocaleString('en-NG',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td><div class="row-acts">
-        <button class="ra" data-act="view"  data-id="${o.id}" title="View">👁</button>
+        <button class="ra" data-act="view"  data-id="${o.id}" title="View Order Details" style="color:#7C3AED;">👁</button>
         ${can('assignRider') ? `<button class="ra" data-act="assign" data-id="${o.id}" title="Assign Rider" style="color:#059669;">🛵</button>` : ''}
-        ${canEdit   ? `<button class="ra" data-act="edit" data-id="${o.id}" title="Edit">✏️</button>` : `<button class="ra" style="opacity:.3;cursor:not-allowed" title="Edit not allowed for your role" disabled>✏️</button>`}
-        ${canDelete ? `<button class="ra red" data-act="del" data-id="${o.id}" title="Delete">🗑</button>` : `<button class="ra" style="opacity:.3;cursor:not-allowed" title="Delete not allowed for your role" disabled>🗑</button>`}
+        ${canEdit   ? `<button class="ra" data-act="edit" data-id="${o.id}" title="Edit Order">✏️</button>` : `<button class="ra" style="opacity:.3;cursor:not-allowed" title="Edit not allowed for your role" disabled>✏️</button>`}
+        ${canDelete ? `<button class="ra red" data-act="del" data-id="${o.id}" title="Delete Order">🗑</button>` : `<button class="ra" style="opacity:.3;cursor:not-allowed" title="Delete not allowed for your role" disabled>🗑</button>`}
       </div></td>
     </tr>`).join('');
 
@@ -1260,7 +1969,8 @@ function renderOrdersTable() {
     });
   });
   tbody.querySelectorAll('[data-act]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       if (btn.disabled) return;
       const o = ORDERS_DB.find(x => x.id === btn.dataset.id);
       if (!o) return;
@@ -1793,38 +2503,101 @@ window.openAssignRider = async function(orderId) {
     return;
   }
 
+  /* ── Check which riders are at their active delivery limit ──
+     A rider is considered BUSY (unavailable) only when they already have
+     5 or more orders with status='shipped' (the system maximum per rider).
+     Below that threshold they are still available for assignment.           */
+  const riderActiveCount = {};
+  ORDERS_DB
+    .filter(ord => ord.status === 'shipped' && ord.rider_id && ord.id !== orderId)
+    .forEach(ord => {
+      const rid = String(ord.rider_id);
+      riderActiveCount[rid] = (riderActiveCount[rid] || 0) + 1;
+    });
+  const MAX_ACTIVE = 5;
+  const busyRiderIds = new Set(
+    Object.entries(riderActiveCount)
+      .filter(([, count]) => count >= MAX_ACTIVE)
+      .map(([rid]) => rid)
+  );
+
   const currentRider = o.rider_name || null;
 
+  /* ── Build the order summary for the modal header ── */
+  const orderSummaryParts = (o.category || '').split(/,(?![^\[]*\])/).map(p => {
+    const qtyMatch = p.trim().match(/\(x(\d+)\)\s*$/);
+    const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+    const name = p.trim().replace(/\(x\d+\)\s*$/, '').replace(/\s*\[.*?\]\s*$/, '').trim();
+    return name ? `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border:1px solid var(--border);border-radius:6px;font-size:.75rem;background:var(--bg);">
+      <strong style="color:var(--brand);">×${qty}</strong>
+      <span style="color:var(--t1);">${name}</span>
+    </span>` : null;
+  }).filter(Boolean).join(' ');
+
   openModal('Assign Rider 🛵', `
-    <div style="margin-bottom:16px;">
-      <p style="font-size:.82rem;color:var(--t2);margin-bottom:4px;">Order: <strong style="color:var(--t1);">${o.id}</strong></p>
-      <p style="font-size:.82rem;color:var(--t2);margin-bottom:${currentRider?'8px':'0'};">Customer: <strong style="color:var(--t1);">${o.customer}</strong></p>
-      ${currentRider ? `<div style="font-size:.78rem;color:#86EFAC;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:8px;padding:8px 12px;">Currently assigned to: <strong>${currentRider}</strong></div>` : ''}
-    </div>
-    <div style="margin-bottom:16px;">
-      <label style="font-size:.78rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:10px;">Select Rider</label>
-      <div style="display:flex;flex-direction:column;gap:8px;" id="riderList">
-        ${riders.map(r => `
-          <label style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;transition:border-color .15s;" id="riderOpt_${r.id}" onclick="selectRiderOpt(${r.id})">
-            <input type="radio" name="riderSel" value="${r.id}" style="display:none;" ${o.rider_id==r.id?'checked':''} />
-            <div style="width:36px;height:36px;border-radius:50%;background:#059669;display:grid;place-items:center;font-size:.8rem;font-weight:700;color:#fff;flex-shrink:0;">${(r.first[0]+(r.last?.[0]||'')).toUpperCase()}</div>
-            <div style="flex:1;">
-              <div style="font-weight:600;font-size:.85rem;color:var(--t1);">${r.first} ${r.last}</div>
-              <div style="font-size:.72rem;color:var(--t2);">${r.email}</div>
-            </div>
-            <div id="riderCheck_${r.id}" style="width:18px;height:18px;border-radius:50%;background:${o.rider_id==r.id?'#059669':'var(--border)'};display:grid;place-items:center;flex-shrink:0;">
-              ${o.rider_id==r.id?'<svg width="9" height="9" viewBox="0 0 9 9"><path d="M1.5 4.5l2 2L7.5 2" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>':''}
-            </div>
-          </label>`).join('')}
+    <!-- Order summary card -->
+    <div style="background:linear-gradient(135deg,rgba(232,68,26,.07),rgba(232,68,26,.02));border:1px solid rgba(232,68,26,.18);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+      <div style="font-size:.6rem;font-weight:800;color:var(--brand);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;">📦 Order to Assign</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:.88rem;font-weight:800;color:var(--t1);">${o.id}</div>
+          <div style="font-size:.76rem;color:var(--t2);margin-top:2px;">📅 ${fmtDate(o.date)}</div>
+          ${o.address ? `<div style="font-size:.73rem;color:var(--t2);margin-top:3px;">📍 ${o.address}</div>` : ''}
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:1rem;font-weight:800;color:var(--brand);">${currencySymbol}${o.total.toLocaleString('en-NG',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+          <div style="font-size:.7rem;color:var(--t2);margin-top:2px;">${o.items} item${o.items!==1?'s':''}</div>
+        </div>
       </div>
+      ${orderSummaryParts ? `<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:5px;">${orderSummaryParts}</div>` : ''}
+      ${currentRider ? `<div style="margin-top:10px;padding:6px 10px;background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.25);border-radius:8px;font-size:.75rem;color:#34D399;font-weight:700;">🛵 Currently assigned to: ${currentRider}</div>` : ''}
+    </div>
+
+    <!-- Rider selection -->
+    <div style="margin-bottom:16px;">
+      <label style="font-size:.68rem;font-weight:800;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;display:block;margin-bottom:10px;">Select a Rider</label>
+      <div style="display:flex;flex-direction:column;gap:8px;" id="riderList">
+        ${riders.map(r => {
+          const isBusy      = busyRiderIds.has(String(r.id));
+          const activeCount = riderActiveCount[String(r.id)] || 0;
+          const isCurrent   = o.rider_id == r.id;
+          const initials    = (r.first[0] + (r.last?.[0] || '')).toUpperCase();
+          const avatarBg    = isBusy ? '#6B7280' : '#059669';
+          const borderColor = isCurrent ? '#059669' : isBusy ? 'rgba(239,68,68,.35)' : 'var(--border)';
+          const opacityStyle = isBusy ? 'opacity:.65;' : '';
+          return `
+          <label style="display:flex;align-items:center;gap:12px;padding:13px 15px;border:1.5px solid ${borderColor};border-radius:10px;${isBusy?'cursor:not-allowed;background:rgba(239,68,68,.03);':'cursor:pointer;'}${opacityStyle}transition:border-color .15s;" id="riderOpt_${r.id}" ${!isBusy?`onclick="selectRiderOpt(${r.id})"`:'title="This rider is currently on a delivery"'}>
+            <input type="radio" name="riderSel" value="${r.id}" style="display:none;" ${isCurrent?'checked':''} ${isBusy?'disabled':''} />
+            <div style="width:40px;height:40px;border-radius:50%;background:${avatarBg};display:grid;place-items:center;font-size:.82rem;font-weight:800;color:#fff;flex-shrink:0;position:relative;">
+              ${initials}
+              ${isBusy ? `<span style="position:absolute;bottom:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:#EF4444;border:2px solid var(--surface);"></span>` : ''}
+              ${isCurrent && !isBusy ? `<span style="position:absolute;bottom:-2px;right:-2px;width:13px;height:13px;border-radius:50%;background:#059669;border:2px solid var(--surface);"></span>` : ''}
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:700;font-size:.86rem;color:var(--t1);">${r.first} ${r.last}</div>
+              <div style="font-size:.71rem;color:var(--t2);margin-top:1px;">${r.email}</div>
+              ${isBusy
+                ? `<div style="font-size:.68rem;font-weight:800;color:#EF4444;margin-top:3px;display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:#EF4444;display:inline-block;"></span> ${activeCount}/${MAX_ACTIVE} Deliveries — At Capacity</div>`
+                : activeCount > 0
+                  ? `<div style="font-size:.68rem;font-weight:700;color:#F59E0B;margin-top:3px;display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:#F59E0B;display:inline-block;animation:pulse 1.5s ease-in-out infinite;"></span> ${activeCount}/${MAX_ACTIVE} Active — Available</div>`
+                  : `<div style="font-size:.68rem;font-weight:700;color:#34D399;margin-top:3px;display:flex;align-items:center;gap:4px;"><span style="width:6px;height:6px;border-radius:50%;background:#34D399;display:inline-block;animation:pulse 1.5s ease-in-out infinite;"></span> Available (0/${MAX_ACTIVE})</div>`
+              }
+            </div>
+            <div id="riderCheck_${r.id}" style="width:20px;height:20px;border-radius:50%;background:${isCurrent&&!isBusy?'#059669':'var(--border)'};display:grid;place-items:center;flex-shrink:0;">
+              ${isCurrent&&!isBusy?'<svg width="10" height="10" viewBox="0 0 9 9"><path d="M1.5 4.5l2 2L7.5 2" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>':''}
+            </div>
+          </label>`;
+        }).join('')}
+      </div>
+      <p style="font-size:.68rem;color:var(--t3);margin-top:10px;">🔴 Riders showing <strong style="color:#EF4444;">At Capacity</strong> already have ${MAX_ACTIVE} active deliveries and cannot take more. 🟡 Riders showing an active count are still available.</p>
     </div>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Cancel</button>
       <button class="btn-primary" onclick="confirmAssignRider('${orderId}')">🛵 Assign Rider</button>
     </div>`);
 
-  // Pre-select current rider if any
-  if (o.rider_id) selectRiderOpt(o.rider_id);
+  // Pre-select current rider if any and if not busy
+  if (o.rider_id && !busyRiderIds.has(String(o.rider_id))) selectRiderOpt(o.rider_id);
 };
 
 window.selectRiderOpt = function(riderId) {
@@ -1846,7 +2619,8 @@ window.selectRiderOpt = function(riderId) {
 
 window.confirmAssignRider = async function(orderId) {
   const sel = document.querySelector('input[name="riderSel"]:checked');
-  if (!sel) { showToast('Please select a rider first.', 'error'); return; }
+  if (!sel) { showToast('Please select an available rider first.', 'error'); return; }
+  if (sel.disabled) { showToast('This rider is currently on a delivery and is not available.', 'error'); return; }
 
   const riderId = parseInt(sel.value);
   const riderLabel = sel.closest('label');
@@ -1963,16 +2737,23 @@ function applyInvFilters() {
 }
 
 function renderInvKPIs() {
-  document.getElementById('invTotal').textContent   = INV_DB.length;
-  document.getElementById('invInStock').textContent = INV_DB.filter(p => stockStatus(p) === 'in_stock').length;
-  document.getElementById('invLow').textContent     = INV_DB.filter(p => stockStatus(p) === 'low_stock').length;
-  document.getElementById('invOut').textContent     = INV_DB.filter(p => stockStatus(p) === 'out_of_stock').length;
+  const elTotal   = document.getElementById('invTotal');
+  const elInStock = document.getElementById('invInStock');
+  const elLow     = document.getElementById('invLow');
+  const elOut     = document.getElementById('invOut');
+  if (!elTotal) return; /* not on inventory page */
+  elTotal.textContent   = INV_DB.length;
+  elInStock.textContent = INV_DB.filter(p => stockStatus(p) === 'in_stock').length;
+  elLow.textContent     = INV_DB.filter(p => stockStatus(p) === 'low_stock').length;
+  elOut.textContent     = INV_DB.filter(p => stockStatus(p) === 'out_of_stock').length;
 }
 
 function renderInvTable() {
   const tbody = document.getElementById('invTbody');
   const info  = document.getElementById('invInfo');
   const sym   = currencySymbol;
+  /* Not on inventory page (e.g. rider page) — bail out silently */
+  if (!tbody || !info) return;
 
   if (!INV_DB.length) {
     tbody.innerHTML = `
@@ -2097,9 +2878,11 @@ function renderInvTable() {
 
 function updateBulkBar() {
   const bar = document.getElementById('bulkBar');
+  if (!bar) return;
   if (S.invSelected.size > 0) {
     bar.style.display = 'flex';
-    document.getElementById('bulkCount').textContent = `${S.invSelected.size} selected`;
+    const bc = document.getElementById('bulkCount');
+    if (bc) bc.textContent = `${S.invSelected.size} selected`;
   } else {
     bar.style.display = 'none';
   }
