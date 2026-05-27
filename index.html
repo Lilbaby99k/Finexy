@@ -68,6 +68,10 @@
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         Users
       </a>
+      <a class="sb-link" data-page="permissions" style="display:none">
+        <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Permissions
+      </a>
       <a class="sb-link" data-page="deliveries" style="display:none">
         <svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8zM5.5 21a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM19.5 21a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>
         Deliveries
@@ -102,6 +106,10 @@
       <input id="topSearch" type="text" placeholder="Search anything… (⌘K)"/>
     </div>
     <div class="top-right">
+      <button class="theme-toggle" id="themeToggle" title="Toggle Dark / Light Mode">
+        <!-- Moon icon shown in light mode; Sun shown in dark mode via JS swap -->
+        <svg id="themeIcon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
       <button class="top-icon" id="notifTrigger">
         <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span class="pip" id="notifPip" style="display:none"></span>
@@ -189,11 +197,9 @@
             <thead><tr>
               <th><input type="checkbox" id="selectAll"/></th>
               <th data-col="id">Order ID</th>
-              <th data-col="date">Date</th>
               <th data-col="customer">Customer</th>
-              <th data-col="category">Category</th>
+              <th data-col="category">Items Ordered</th>
               <th data-col="status">Status</th>
-              <th data-col="items">Items</th>
               <th data-col="total">Total</th>
               <th>Actions</th>
             </tr></thead>
@@ -287,8 +293,40 @@
 
     <!-- ══ CUSTOMERS ══ -->
     <section class="page" id="page-customers">
-      <div class="ph"><h1>Customers</h1><p class="ph-sub">Manage your customer base</p></div>
-      <div class="blank-page"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><h2>Customers</h2><p>Customer list will appear here as you add orders.</p></div>
+      <div class="ph">
+        <div><h1>Customers</h1><p class="ph-sub">All customers derived from your orders</p></div>
+        <div class="ph-actions">
+          <div class="mini-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input id="custSearch" type="text" placeholder="Search customers…"/>
+          </div>
+        </div>
+      </div>
+      <!-- KPI strip -->
+      <div class="kpi-row" style="margin-bottom:20px;">
+        <div class="kpi-card"><div class="kpi-head"><span>Total Customers</span><div class="kpi-ico c2"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div><div class="kpi-num" id="custKpiTotal">0</div><div class="kpi-foot">Unique customers</div></div>
+        <div class="kpi-card"><div class="kpi-head"><span>With Phone</span><div class="kpi-ico c1"><svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.07 4.18 2 2 0 0 1 5.06 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L9.06 9.91a16 16 0 0 0 6.29 6.29l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div></div><div class="kpi-num" id="custKpiPhone">0</div><div class="kpi-foot">Contactable</div></div>
+        <div class="kpi-card"><div class="kpi-head"><span>Repeat Customers</span><div class="kpi-ico c3"><svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div></div><div class="kpi-num" id="custKpiRepeat">0</div><div class="kpi-foot">2+ orders</div></div>
+        <div class="kpi-card"><div class="kpi-head"><span>Total Spent</span><div class="kpi-ico c4"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div></div><div class="kpi-num" id="custKpiRevenue">$0</div><div class="kpi-foot">From all customers</div></div>
+      </div>
+      <div class="card">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>#</th>
+              <th>Customer</th>
+              <th>Phone</th>
+              <th>Address</th>
+              <th>Orders</th>
+              <th>Total Spent</th>
+              <th>Last Order</th>
+              <th>Status</th>
+            </tr></thead>
+            <tbody id="custTbody"></tbody>
+          </table>
+        </div>
+        <div class="tbl-foot"><span id="custInfo">Loading…</span></div>
+      </div>
     </section>
 
     <!-- ══ ORDERS ══ -->
@@ -345,6 +383,12 @@
     <section class="page" id="page-deliveries">
       <div class="ph"><h1>My Deliveries 🛵</h1></div>
       <div class="blank-page"><svg viewBox="0 0 24 24"><rect x="1" y="3" width="15" height="13" rx="2"/><path d="M16 8h4l3 5v3h-7V8z"/></svg><h2>Loading…</h2></div>
+    </section>
+
+    <!-- ══ PERMISSIONS (Admin + Manager) ══ -->
+    <section class="page" id="page-permissions">
+      <div class="ph"><h1>Permissions 🔐</h1><p class="ph-sub">Control what each role is allowed to do</p></div>
+      <div class="blank-page"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><h2>Loading…</h2></div>
     </section>
 
   </div><!-- /content -->
