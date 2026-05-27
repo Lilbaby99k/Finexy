@@ -3,309 +3,167 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<meta name="google-site-verification" content="eucZ5jqbHarKJ075HOoJTo57d9vhB86Jy76HImFf5wM" />
 <title>Finexy — Sign In</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <style>
 :root{
-  --brand:#E8441A;--brand-dk:#C13510;--bg:#0C0D0F;--surface:#141518;--surface2:#1C1E22;
+  --brand:#E8441A;--bg:#0C0D0F;--surface:#141518;--surface2:#1C1E22;
   --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.14);
-  --t1:#F5F5F7;--t2:#8A8F9E;--t3:#4A4F5E;
-  --admin:#E8441A;--manager:#7C3AED;--staff:#0284C7;--rider:#059669;
-  --r:12px;--r-lg:18px;
+  --t1:#F5F5F7;--t2:#8A8F9E;--t3:#4A4F5E;--r:12px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:15px}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;display:flex}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;display:flex;align-items:center;justify-content:center;}
 input,button{font-family:'DM Sans',sans-serif;outline:none}
 
-.auth-wrap{display:flex;width:100%;min-height:100vh}
+.wrap{width:100%;max-width:440px;padding:24px 16px;}
 
-/* LEFT */
-.brand-panel{flex:1;background:linear-gradient(145deg,#1a0d08 0%,#0C0D0F 55%,#0a0f1a 100%);display:flex;flex-direction:column;justify-content:space-between;padding:48px;position:relative;overflow:hidden}
-.brand-panel::before{content:'';position:absolute;top:-120px;left:-80px;width:500px;height:500px;background:radial-gradient(circle,rgba(232,68,26,.18) 0%,transparent 70%);pointer-events:none}
-.brand-panel::after{content:'';position:absolute;bottom:-100px;right:-60px;width:400px;height:400px;background:radial-gradient(circle,rgba(232,68,26,.09) 0%,transparent 70%);pointer-events:none}
-.brand-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:60px 60px;pointer-events:none}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:40px 36px;box-shadow:0 24px 64px rgba(0,0,0,.45);animation:fadeUp .3s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 
-.brand-logo{display:flex;align-items:center;gap:12px;position:relative;z-index:2}
-.logo-icon{width:42px;height:42px;background:var(--brand);border-radius:12px;display:grid;place-items:center;box-shadow:0 0 30px rgba(232,68,26,.4)}
-.logo-text{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;letter-spacing:-.03em}
+/* Logo */
+.logo{display:flex;align-items:center;gap:11px;margin-bottom:28px;justify-content:center;}
+.logo-icon{width:40px;height:40px;background:var(--brand);border-radius:11px;display:grid;place-items:center;box-shadow:0 0 24px rgba(232,68,26,.4);flex-shrink:0;}
+.logo-text{font-family:'Syne',sans-serif;font-size:1.45rem;font-weight:800;letter-spacing:-.03em;}
 
-.brand-content{position:relative;z-index:2}
-.brand-headline{font-family:'Syne',sans-serif;font-size:2.5rem;font-weight:800;line-height:1.15;letter-spacing:-.04em;margin-bottom:18px}
-.brand-headline em{font-style:normal;color:var(--brand)}
-.brand-tagline{font-size:.88rem;color:var(--t2);line-height:1.7;max-width:360px;margin-bottom:36px}
+/* Heading */
+.heading{text-align:center;margin-bottom:28px;}
+.heading h2{font-family:'Syne',sans-serif;font-size:1.45rem;font-weight:800;letter-spacing:-.03em;margin-bottom:6px;}
+.heading p{font-size:.81rem;color:var(--t2);line-height:1.55;}
 
-.role-showcase{display:flex;flex-direction:column;gap:11px;max-width:340px}
-.rc{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;display:flex;align-items:flex-start;gap:12px}
-.rc-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;margin-top:4px}
-.rc-dot.a{background:var(--admin);box-shadow:0 0 8px var(--admin)}
-.rc-dot.m{background:var(--manager);box-shadow:0 0 8px var(--manager)}
-.rc-dot.s{background:var(--staff);box-shadow:0 0 8px var(--staff)}
-.rc-dot.r{background:var(--rider);box-shadow:0 0 8px var(--rider)}
-.rc h4{font-size:.8rem;font-weight:700;margin-bottom:3px}
-.rc p{font-size:.68rem;color:var(--t2);line-height:1.45}
-.rc-perms{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
-.perm{font-size:.6rem;padding:2px 7px;border-radius:20px;font-weight:600}
-.perm.yes{background:rgba(34,197,94,.15);color:#86EFAC}
-.perm.no {background:rgba(239,68,68,.12);color:#FCA5A5;text-decoration:line-through;opacity:.7}
+/* Fields */
+.fg{margin-bottom:14px;}
+.fg label{display:block;font-size:.67rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px;}
+.fw{position:relative;display:flex;align-items:center;}
+.fw svg.fi{position:absolute;left:13px;width:15px;height:15px;stroke:var(--t3);fill:none;stroke-width:1.8;stroke-linecap:round;pointer-events:none;transition:stroke .15s;}
+.fw:focus-within svg.fi{stroke:var(--brand);}
+.fw input{width:100%;height:46px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:0 42px 0 40px;font-size:.88rem;color:var(--t1);transition:border-color .15s,box-shadow .15s;}
+.fw input::placeholder{color:var(--t3);}
+.fw input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(232,68,26,.12);}
+.tpw{position:absolute;right:12px;background:none;border:none;cursor:pointer;color:var(--t3);padding:4px;transition:color .15s;}
+.tpw:hover{color:var(--t1);}
+.tpw svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;display:block;}
 
-.brand-footer{font-size:.72rem;color:var(--t3);position:relative;z-index:2}
-
-/* RIGHT */
-.form-panel{width:500px;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;justify-content:center;padding:44px 42px;overflow-y:auto}
-.form-panel{animation:slideIn .35s ease}
-@keyframes slideIn{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
-
-.auth-tabs{display:flex;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);padding:4px;gap:4px;margin-bottom:28px}
-.auth-tab{flex:1;padding:9px;border:none;background:transparent;border-radius:9px;font-size:.82rem;font-weight:500;color:var(--t2);cursor:pointer;transition:background .18s,color .18s}
-.auth-tab.active{background:var(--brand);color:#fff;font-weight:600}
-
-.form-heading{margin-bottom:22px}
-.form-heading h2{font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;letter-spacing:-.03em;margin-bottom:5px}
-.form-heading p{font-size:.81rem;color:var(--t2);line-height:1.5}
-
-.form-section{display:none}
-.form-section.active{display:block;animation:fadeUp .25s ease}
-@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-
-/* ROLE PICKER */
-.role-picker{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-bottom:18px}
-.rp{border:2px solid var(--border2);background:var(--surface2);border-radius:var(--r);padding:13px 8px;text-align:center;cursor:pointer;transition:all .18s;position:relative;user-select:none}
-.rp:hover{transform:translateY(-2px);border-color:var(--t3)}
-.rp .rp-icon{font-size:1.3rem;margin-bottom:5px}
-.rp .rp-name{font-size:.78rem;font-weight:700;display:block;margin-bottom:2px}
-.rp .rp-sub{font-size:.62rem;color:var(--t2)}
-.rp .rp-tick{position:absolute;top:6px;right:6px;width:16px;height:16px;border-radius:50%;display:none;place-items:center;font-size:.6rem;color:#fff;font-weight:900}
-.rp.sel-admin  {border-color:var(--admin);  background:rgba(232,68,26,.08)}
-.rp.sel-manager{border-color:var(--manager);background:rgba(124,58,237,.08)}
-.rp.sel-staff  {border-color:var(--staff);  background:rgba(2,132,199,.08)}
-.rp.sel-rider  {border-color:var(--rider);  background:rgba(5,150,105,.08)}
-.rp.sel-admin   .rp-tick{display:grid;background:var(--admin)}
-.rp.sel-manager .rp-tick{display:grid;background:var(--manager)}
-.rp.sel-staff   .rp-tick{display:grid;background:var(--staff)}
-.rp.sel-rider   .rp-tick{display:grid;background:var(--rider)}
-
-/* FIELDS */
-.fg{margin-bottom:13px}
-.fg label{display:block;font-size:.68rem;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
-.fw{position:relative;display:flex;align-items:center}
-.fw svg.fi{position:absolute;left:12px;width:15px;height:15px;stroke:var(--t3);fill:none;stroke-width:1.8;stroke-linecap:round;pointer-events:none;transition:stroke .15s}
-.fw:focus-within svg.fi{stroke:var(--brand)}
-.fw input{width:100%;height:43px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);padding:0 40px 0 38px;font-size:.85rem;color:var(--t1);transition:border-color .15s,box-shadow .15s}
-.fw input::placeholder{color:var(--t3)}
-.fw input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(232,68,26,.12)}
-.fw input[readonly]{background:rgba(255,255,255,.03);color:var(--t3);cursor:default}
-.tpw{position:absolute;right:11px;background:none;border:none;cursor:pointer;color:var(--t3);transition:color .15s;padding:3px}
-.tpw:hover{color:var(--t1)}
-.tpw svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;display:block}
-.name-row{display:grid;grid-template-columns:1fr 1fr;gap:11px}
-.forgot-row{display:flex;justify-content:flex-end;margin:-3px 0 13px}
-.forgot-btn{font-size:.72rem;color:var(--brand);background:none;border:none;cursor:pointer}
-
-/* PW STRENGTH */
-.pws{margin-top:6px}
-.pw-bars{display:flex;gap:4px;margin-bottom:3px}
-.pwb{flex:1;height:3px;border-radius:2px;background:var(--border2);transition:background .3s}
-.pwb.weak{background:#EF4444}.pwb.medium{background:#F59E0B}.pwb.strong{background:#22C55E}
-.pw-lbl{font-size:.65rem;color:var(--t3)}
+/* Code hint */
+.code-hint{margin-top:5px;font-size:.7rem;color:var(--t3);line-height:1.5;padding:7px 11px;background:rgba(255,255,255,.03);border-radius:8px;border:1px solid var(--border);}
 
 /* MSG */
-.fmsg{padding:10px 13px;border-radius:var(--r);font-size:.78rem;font-weight:500;margin-bottom:13px;display:none;align-items:center;gap:8px}
-.fmsg.show{display:flex}
-.fmsg.error  {background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#FCA5A5}
-.fmsg.success{background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.25); color:#86EFAC}
-.fmsg svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;flex-shrink:0}
+.fmsg{padding:11px 14px;border-radius:var(--r);font-size:.79rem;font-weight:500;margin-bottom:14px;display:none;align-items:center;gap:9px;line-height:1.45;}
+.fmsg.show{display:flex;}
+.fmsg.error  {background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#FCA5A5;}
+.fmsg.success{background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.25); color:#86EFAC;}
+.fmsg svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;flex-shrink:0;}
 
-/* ADMIN NOTE */
-.admin-note{background:rgba(232,68,26,.08);border:1px solid rgba(232,68,26,.22);border-radius:var(--r);padding:10px 13px;font-size:.74rem;color:#FDBA74;margin-bottom:13px;display:flex;gap:8px;align-items:flex-start;line-height:1.5}
+/* Role badge — shown after successful identification */
+.role-banner{display:none;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--r);margin-bottom:14px;font-size:.8rem;font-weight:600;}
+.role-banner.show{display:flex;}
 
-/* SUBMIT */
-.bsub{width:100%;height:45px;border:none;border-radius:var(--r);font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .18s;color:#fff;position:relative;overflow:hidden}
-.bsub.ba{background:var(--admin);  box-shadow:0 4px 18px rgba(232,68,26,.3)}
-.bsub.bm{background:var(--manager);box-shadow:0 4px 18px rgba(124,58,237,.3)}
-.bsub.bs{background:var(--staff);  box-shadow:0 4px 18px rgba(2,132,199,.3)}
-.bsub.br{background:var(--rider);  box-shadow:0 4px 18px rgba(5,150,105,.3)}
-.bsub:hover{transform:translateY(-1px);filter:brightness(1.08)}
-.bsub.loading{pointer-events:none}
-.spin{display:none;width:17px;height:17px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
-.bsub.loading .spin{display:block}
-.bsub.loading .bl{display:none}
+/* Submit */
+.bsub{width:100%;height:47px;border:none;border-radius:var(--r);font-family:'DM Sans',sans-serif;font-size:.92rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;transition:all .18s;color:#fff;background:var(--brand);box-shadow:0 4px 18px rgba(232,68,26,.3);margin-top:4px;}
+.bsub:hover{transform:translateY(-1px);filter:brightness(1.08);}
+.bsub.loading{pointer-events:none;opacity:.8;}
+.spin{display:none;width:17px;height:17px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;}
+.bsub.loading .spin{display:block;}
+.bsub.loading .bl{display:none;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-.terms{font-size:.7rem;color:var(--t3);text-align:center;margin-top:11px;line-height:1.6}
-.terms a{color:var(--brand);text-decoration:none}
-.sw{text-align:center;font-size:.77rem;color:var(--t2);margin-top:16px}
-.sw button{background:none;border:none;color:var(--brand);font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:.77rem}
+/* Footer */
+.foot{text-align:center;margin-top:20px;font-size:.72rem;color:var(--t3);}
 
-/* RESPONSIVE */
-@media(max-width:860px){
-  .brand-panel{display:none}
-  .form-panel{width:100%;border-left:none;padding:40px 22px;padding-top:52px}
-  .mob-logo{display:flex !important;align-items:center;gap:10px;margin-bottom:28px}
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;padding:10px 16px;border-radius:10px;font-size:.79rem;font-weight:500;opacity:0;transform:translateY(8px);transition:opacity .24s,transform .24s;pointer-events:none;z-index:9999;}
+.toast.show{opacity:1;transform:none;}
+.toast.success{background:#166534;color:#86EFAC;border:1px solid rgba(34,197,94,.3);}
+.toast.error  {background:#7F1D1D;color:#FCA5A5;border:1px solid rgba(239,68,68,.3);}
+
+@media(max-width:480px){
+  .card{padding:32px 22px;}
 }
-.mob-logo{display:none}
-
-/* TOAST */
-.toast{position:fixed;bottom:20px;right:20px;padding:10px 16px;border-radius:10px;font-size:.79rem;font-weight:500;opacity:0;transform:translateY(8px);transition:opacity .24s,transform .24s;pointer-events:none;z-index:9999;box-shadow:0 8px 30px rgba(0,0,0,.4)}
-.toast.show{opacity:1;transform:none}
-.toast.success{background:#166534;color:#86EFAC;border:1px solid rgba(34,197,94,.3)}
-.toast.error  {background:#7F1D1D;color:#FCA5A5;border:1px solid rgba(239,68,68,.3)}
 </style>
 </head>
 <body>
-<div class="auth-wrap">
 
-  <!-- ░░ LEFT BRAND ░░ -->
-  <div class="brand-panel">
-    <div class="brand-grid"></div>
-    <div class="brand-logo">
-      <div class="logo-icon"><svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="#fff"/></svg></div>
+<div class="wrap">
+  <div class="card">
+
+    <!-- Logo -->
+    <div class="logo">
+      <div class="logo-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="#fff"/></svg>
+      </div>
       <span class="logo-text">Finexy</span>
     </div>
 
-    <div class="brand-content">
-      <h1 class="brand-headline">One platform.<br/>Every <em>role.</em><br/>Full control.</h1>
-      <p class="brand-tagline">Finexy gives your whole team the right access — Admins, Managers and Staff each see exactly what they need.</p>
+    <!-- Heading -->
+    <div class="heading">
+      <h2>Welcome back</h2>
+      <p>Enter your credentials to access your account.</p>
+    </div>
 
-      <div class="role-showcase">
-        <div class="rc">
-          <div class="rc-dot a"></div>
-          <div><h4>👑 Admin</h4><p>Full control over users, settings, orders, inventory and analytics.</p></div>
-        </div>
-        <div class="rc">
-          <div class="rc-dot m"></div>
-          <div><h4>📊 Manager</h4><p>Manages orders and inventory. Requires admin approval to access.</p></div>
-        </div>
-        <div class="rc">
-          <div class="rc-dot s"></div>
-          <div><h4>🧑‍💼 Staff</h4><p>Handles orders and views dashboard. Requires admin approval to access.</p></div>
-        </div>
-        <div class="rc">
-          <div class="rc-dot r"></div>
-          <div><h4>🛵 Rider</h4><p>Views assigned deliveries and updates delivery status. Requires admin approval.</p></div>
-        </div>
+    <!-- Message -->
+    <div class="fmsg" id="msg">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span id="msgT"></span>
+    </div>
+
+    <!-- Role banner (shown when role is detected) -->
+    <div class="role-banner" id="roleBanner">
+      <span id="roleBannerIcon"></span>
+      <span id="roleBannerText"></span>
+    </div>
+
+    <!-- Email -->
+    <div class="fg">
+      <label>Email Address</label>
+      <div class="fw">
+        <svg class="fi" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <input type="email" id="lEmail" placeholder="you@example.com" autocomplete="email"/>
       </div>
     </div>
 
-    <div class="brand-footer">© 2026 Finexy. All rights reserved.</div>
-  </div>
-
-  <!-- ░░ RIGHT FORM ░░ -->
-  <div class="form-panel">
-
-    <div class="mob-logo">
-      <div class="logo-icon" style="width:36px;height:36px;background:var(--brand);border-radius:10px;display:grid;place-items:center">
-        <svg width="18" height="18" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="#fff"/></svg>
+    <!-- Password -->
+    <div class="fg">
+      <label>Password</label>
+      <div class="fw">
+        <svg class="fi" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <input type="password" id="lPw" placeholder="Your password" autocomplete="current-password"/>
+        <button class="tpw" onclick="tpw('lPw',this)" tabindex="-1">
+          <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
       </div>
-      <span style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.2rem">Finexy</span>
     </div>
 
-    <div class="auth-tabs">
-      <button class="auth-tab active" id="tabLogin"  onclick="switchTab('login')">Sign In</button>
-      <button class="auth-tab"        id="tabSignup" onclick="switchTab('signup')">Create Account</button>
+    <!-- Access Code (hidden for admin) -->
+    <div class="fg" id="codeWrap" style="display:none;">
+      <label>Access Code</label>
+      <div class="fw">
+        <svg class="fi" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <input type="password" id="lCode" placeholder="e.g. FXY-STF-A3K9P" autocomplete="off"/>
+        <button class="tpw" onclick="tpw('lCode',this)" tabindex="-1">
+          <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+      <div class="code-hint">Your access code was provided when your account was created. Contact your Admin or Manager if you don't have it.</div>
     </div>
 
-    <!-- ════ LOGIN ════ -->
-    <div class="form-section active" id="loginSection">
-      <div class="form-heading"><h2>Welcome back</h2><p>Select your role then sign in.</p></div>
+    <!-- Sign In Button -->
+    <button class="bsub" id="lBtn" onclick="doLogin()">
+      <span class="bl">Sign In →</span>
+      <div class="spin"></div>
+    </button>
 
-      <div class="role-picker" id="lpicker">
-        <div class="rp sel-admin" data-role="admin" onclick="pick('l','admin')">
-          <div class="rp-icon">👑</div><span class="rp-name">Admin</span><span class="rp-sub">Full access</span><div class="rp-tick">✓</div>
-        </div>
-        <div class="rp" data-role="manager" onclick="pick('l','manager')">
-          <div class="rp-icon">📊</div><span class="rp-name">Manager</span><span class="rp-sub">Manage ops</span><div class="rp-tick">✓</div>
-        </div>
-        <div class="rp" data-role="staff" onclick="pick('l','staff')">
-          <div class="rp-icon">🧑‍💼</div><span class="rp-name">Staff</span><span class="rp-sub">Orders only</span><div class="rp-tick">✓</div>
-        </div>
-        <div class="rp" data-role="rider" onclick="pick('l','rider')">
-          <div class="rp-icon">🛵</div><span class="rp-name">Rider</span><span class="rp-sub">Deliveries</span><div class="rp-tick">✓</div>
-        </div>
-      </div>
-
-      <div class="fmsg" id="lmsg"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span id="lmsgT"></span></div>
-
-      <div class="fg"><label>Email Address</label>
-        <div class="fw"><svg class="fi" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-        <input type="email" id="lEmail" placeholder="you@example.com"/></div>
-      </div>
-      <div class="fg"><label>Password</label>
-        <div class="fw"><svg class="fi" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        <input type="password" id="lPw" placeholder="Your password"/>
-        <button class="tpw" onclick="tpw('lPw',this)" tabindex="-1"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-        </div>
-      </div>
-      <div class="forgot-row"><button class="forgot-btn" onclick="doForgot()">Forgot password?</button></div>
-
-      <button class="bsub ba" id="lBtn" onclick="doLogin()"><span class="bl">Sign In as Admin →</span><div class="spin"></div></button>
-      <div class="sw">No account? <button onclick="switchTab('signup')">Create one free</button></div>
-    </div>
-
-    <!-- ════ SIGNUP ════ -->
-    <div class="form-section" id="signupSection">
-      <div class="form-heading"><h2>Create account</h2><p>Pick your role and fill in your details.</p></div>
-
-      <div class="role-picker" id="spicker">
-        <div class="rp sel-admin" data-role="admin" onclick="pick('s','admin')">
-          <div class="rp-icon">👑</div><span class="rp-name">Admin</span><span class="rp-sub">Full access</span><div class="rp-tick">✓</div>
-        </div>
-        <div class="rp" data-role="manager" onclick="pick('s','manager')">
-          <div class="rp-icon">📊</div><span class="rp-name">Manager</span><span class="rp-sub">Manage ops</span><div class="rp-tick">✓</div>
-        </div>
-        <div class="rp" data-role="staff" onclick="pick('s','staff')">
-          <div class="rp-icon">🧑‍💼</div><span class="rp-name">Staff</span><span class="rp-sub">Orders only</span><div class="rp-tick">✓</div>
-        </div>
-        <div class="rp" data-role="rider" onclick="pick('s','rider')">
-          <div class="rp-icon">🛵</div><span class="rp-name">Rider</span><span class="rp-sub">Deliveries</span><div class="rp-tick">✓</div>
-        </div>
-      </div>
-
-      <div class="admin-note" id="aNote" style="display:none">
-        <span style="flex-shrink:0">🔑</span>
-        <span>Creating an <strong>Admin account</strong> requires an <strong>Admin Access Code</strong>. Contact your administrator if you don't have one.</span>
-      </div>
-      <div class="admin-note" id="approvalNote" style="display:none;background:rgba(5,150,105,.08);border-color:rgba(5,150,105,.25);color:#6EE7B7">
-        <span style="flex-shrink:0">⏳</span>
-        <span>After registering, your account will be <strong>pending approval</strong>. You can log in once an Admin approves your account.</span>
-      </div>
-      <!-- shown ONLY after successful registration of non-admin -->
-      <div class="admin-note" id="postRegNote" style="display:none;background:rgba(5,150,105,.08);border-color:rgba(5,150,105,.25);color:#6EE7B7">
-        <span style="flex-shrink:0">✅</span>
-        <span>Registration submitted! Waiting for Admin approval before you can log in.</span>
-      </div>
-
-      <div class="fmsg" id="smsg"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span id="smsgT"></span></div>
-
-      <div class="name-row">
-        <div class="fg"><label>First Name</label><div class="fw"><svg class="fi" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><input type="text" id="sFirst" placeholder="John"/></div></div>
-        <div class="fg"><label>Last Name</label><div class="fw"><svg class="fi" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><input type="text" id="sLast" placeholder="Doe"/></div></div>
-      </div>
-      <div class="fg"><label>Business / Store Name</label><div class="fw"><svg class="fi" viewBox="0 0 24 24"><path d="M3 9l1-5h16l1 5"/><path d="M3 9h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/></svg><input type="text" id="sBiz" placeholder="My Store"/></div></div>
-      <div class="fg"><label>Email Address</label><div class="fw"><svg class="fi" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg><input type="email" id="sEmail" placeholder="you@example.com"/></div></div>
-      <div class="fg"><label>Password</label>
-        <div class="fw"><svg class="fi" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        <input type="password" id="sPw" placeholder="Min. 6 characters" oninput="chkStr(this.value)"/>
-        <button class="tpw" onclick="tpw('sPw',this)" tabindex="-1"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button></div>
-        <div class="pws"><div class="pw-bars"><div class="pwb" id="b1"></div><div class="pwb" id="b2"></div><div class="pwb" id="b3"></div><div class="pwb" id="b4"></div></div><div class="pw-lbl" id="pwl">Enter a password</div></div>
-      </div>
-      <div class="fg" id="acField"><label id="acLabel">Access Code</label><div class="fw"><svg class="fi" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><input type="password" id="sCode" placeholder="Enter access code"/></div></div>
-
-      <button class="bsub ba" id="sBtn" onclick="doSignup()"><span class="bl">Create Admin Account →</span><div class="spin"></div></button>
-      <p class="terms">By signing up you agree to our <a href="#">Terms</a> and <a href="#">Privacy Policy</a>.</p>
-      <div class="sw">Already have an account? <button onclick="switchTab('login')">Sign in</button></div>
-    </div>
+    <div class="foot">© 2026 Finexy. All rights reserved.</div>
 
   </div>
 </div>
+
 <div class="toast" id="toast"></div>
 
 <script>
-/* ═══════════════════════════════════════
-   SUPABASE CONFIG
-═══════════════════════════════════════ */
+/* ═══════════════════════════════
+   SUPABASE
+═══════════════════════════════ */
 const SUPA_URL = 'https://ymkgqqerdocfcgyphfzs.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlta2dxcWVyZG9jZmNneXBoZnpzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk0ODA3MzUsImV4cCI6MjA5NTA1NjczNX0.SqwwSpwvsstfumhpTJasSsGMbe0LAm7Z3N-H0U2PoVc';
 
@@ -326,247 +184,206 @@ async function sbQuery(path, options={}) {
   return txt ? JSON.parse(txt) : [];
 }
 
-/* ═══════════════════════════════════════
-   CONFIG — Access Codes (change these!)
-═══════════════════════════════════════ */
-const ADMIN_CODE   = 'FINEXY-ADMIN-2026';
-const MANAGER_CODE = 'FINEXY-MGR-2026';
-const STAFF_CODE   = 'FINEXY-STAFF-2026';
-const RIDER_CODE   = 'FINEXY-RIDER-2026';
+/* ═══════════════════════════════
+   DEFAULT ADMIN CREDENTIALS
+   (never shown on the page)
+═══════════════════════════════ */
+const DEFAULT_ADMIN_EMAIL    = 'davidlovemathematics@gmil.com';
+const DEFAULT_ADMIN_PASSWORD = 'Darasimi@2007';
 
-const ROLE_CODES = { admin: ADMIN_CODE, manager: MANAGER_CODE, staff: STAFF_CODE, rider: RIDER_CODE };
-
-const RC = {
-  admin:   { cls:'ba', sel:'sel-admin',   label:'Admin',   btnLogin:'Sign In as Admin →',   btnSignup:'Create Admin Account →' },
-  manager: { cls:'bm', sel:'sel-manager', label:'Manager', btnLogin:'Sign In as Manager →', btnSignup:'Create Manager Account →' },
-  staff:   { cls:'bs', sel:'sel-staff',   label:'Staff',   btnLogin:'Sign In as Staff →',   btnSignup:'Create Staff Account →' },
-  rider:   { cls:'br', sel:'sel-rider',   label:'Rider',   btnLogin:'Sign In as Rider →',   btnSignup:'Create Rider Account →' },
+/* Role display config */
+const ROLE_META = {
+  admin:   { icon:'👑', label:'Admin',   color:'#E8441A', bg:'rgba(232,68,26,.1)',   border:'rgba(232,68,26,.25)'  },
+  manager: { icon:'📊', label:'Manager', color:'#A78BFA', bg:'rgba(124,58,237,.1)',  border:'rgba(124,58,237,.25)' },
+  staff:   { icon:'🧑‍💼', label:'Staff',   color:'#7DD3FC', bg:'rgba(2,132,199,.1)',   border:'rgba(2,132,199,.25)'  },
+  rider:   { icon:'🛵', label:'Rider',   color:'#6EE7B7', bg:'rgba(5,150,105,.1)',   border:'rgba(5,150,105,.25)'  },
 };
-
-let lRole = 'admin', sRole = 'admin';
 
 /* Redirect if already logged in */
 (function(){ if(sessionStorage.getItem('finexy_session')) window.location.replace('index.html'); })();
 
-/* Tab switch */
-function switchTab(t){
-  ['login','signup'].forEach(x=>{
-    document.getElementById(x+'Section').classList.toggle('active', x===t);
-    document.getElementById('tab'+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle('active', x===t);
-  });
-  clearMsgs();
+/* ── Toggle password visibility ── */
+function tpw(id, btn) {
+  const inp  = document.getElementById(id);
+  const show = inp.type === 'password';
+  inp.type   = show ? 'text' : 'password';
+  btn.innerHTML = show
+    ? '<svg viewBox="0 0 24 24"><path d="M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
 }
-window.switchTab=switchTab;
+window.tpw = tpw;
 
-/* Role picker */
-function pick(form, role){
-  const pid  = form==='l' ? 'lpicker' : 'spicker';
-  const isL  = form==='l';
-  document.getElementById(pid).querySelectorAll('.rp').forEach(el=>{
-    el.className='rp';
-  });
-  const el = document.getElementById(pid).querySelector('[data-role="'+role+'"]');
-  if(el) el.classList.add(RC[role].sel);
-
-  if(isL){
-    lRole = role;
-    const b = document.getElementById('lBtn');
-    b.className='bsub '+RC[role].cls;
-    b.querySelector('.bl').textContent = RC[role].btnLogin;
-  } else {
-    sRole = role;
-    const b = document.getElementById('sBtn');
-    b.className='bsub '+RC[role].cls;
-    b.querySelector('.bl').textContent = RC[role].btnSignup;
-    document.getElementById('acField').style.display = 'block'; // always show code field
-    // hide all notes when role changes (they only show after submit)
-    document.getElementById('aNote').style.display        = 'none';
-    document.getElementById('approvalNote').style.display = 'none';
-    document.getElementById('postRegNote').style.display  = 'none';
-    // update code label
-    const lbl = document.querySelector('#acField label');
-    if(lbl) lbl.textContent = role==='admin' ? 'Admin Access Code' : RC[role].label+' Access Code';
-  }
-  clearMsgs();
+function showMsg(msg, type) {
+  const e = document.getElementById('msg');
+  e.className = 'fmsg show ' + type;
+  document.getElementById('msgT').textContent = msg;
 }
-window.pick=pick;
+function clearMsg() { document.getElementById('msg').className = 'fmsg'; }
 
-/* Helpers */
-function showMsg(id,tid,msg,type){ const e=document.getElementById(id); e.className='fmsg show '+type; document.getElementById(tid).textContent=msg; }
-function clearMsgs(){ ['lmsg','smsg'].forEach(id=>{ document.getElementById(id).className='fmsg'; }); }
-
-function tpw(id,btn){
-  const inp=document.getElementById(id); const show=inp.type==='password';
-  inp.type=show?'text':'password';
-  btn.innerHTML=show
-    ?'<svg viewBox="0 0 24 24"><path d="M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>'
-    :'<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+/* ── Seed default admin into Supabase (background, non-blocking) ── */
+async function seedDefaultAdmin() {
+  try {
+    const existing = await sbQuery('users?email=eq.' + encodeURIComponent(DEFAULT_ADMIN_EMAIL) + '&select=id,password');
+    if (existing.length === 0) {
+      await sbQuery('users', {
+        method: 'POST',
+        body: JSON.stringify({
+          first:'Admin', last:'Finexy', business:'Finexy',
+          email: DEFAULT_ADMIN_EMAIL, password: DEFAULT_ADMIN_PASSWORD,
+          role:'admin', approved:true, deactivated:false, access_code:null,
+        }),
+      });
+    }
+  } catch(e) { /* non-fatal */ }
 }
-window.tpw=tpw;
 
-function chkStr(pw){
-  const bars=['b1','b2','b3','b4'].map(id=>document.getElementById(id));
-  const lbl=document.getElementById('pwl');
-  bars.forEach(b=>b.className='pwb');
-  if(!pw){lbl.textContent='Enter a password';return;}
-  let s=0;
-  if(pw.length>=6)s++;if(pw.length>=10)s++;
-  if(/[A-Z]/.test(pw)&&/[0-9]/.test(pw))s++;
-  if(/[^A-Za-z0-9]/.test(pw))s++;
-  const cls=s<=1?'weak':s<=2?'medium':'strong';
-  const txt={weak:'Weak',medium:'Moderate',strong:'Strong ✓'};
-  for(let i=0;i<s;i++)bars[i].classList.add(cls);
-  lbl.textContent=txt[cls];
-  lbl.style.color=cls==='weak'?'#EF4444':cls==='medium'?'#F59E0B':'#22C55E';
-}
-window.chkStr=chkStr;
+/* ═══════════════════════════════
+   SIGN IN  — single unified flow
+═══════════════════════════════ */
+async function doLogin() {
+  const email = document.getElementById('lEmail').value.trim().toLowerCase();
+  const pw    = document.getElementById('lPw').value;
+  const code  = document.getElementById('lCode').value.trim();
 
-/* ── SIGN UP ── */
-async function doSignup(){
-  const first=document.getElementById('sFirst').value.trim();
-  const last =document.getElementById('sLast').value.trim();
-  const biz  =document.getElementById('sBiz').value.trim();
-  const email=document.getElementById('sEmail').value.trim().toLowerCase();
-  const pw   =document.getElementById('sPw').value;
-  const role =sRole;
-  const code =document.getElementById('sCode').value.trim();
+  clearMsg();
 
-  const isAdmin = role === 'admin';
-  document.getElementById('aNote').style.display        = isAdmin ? 'flex' : 'none';
-  document.getElementById('approvalNote').style.display = !isAdmin ? 'flex' : 'none';
-  document.getElementById('postRegNote').style.display  = 'none';
+  if (!email) { showMsg('Enter your email address.', 'error'); return; }
+  if (!pw)    { showMsg('Enter your password.', 'error'); return; }
 
-  if(!first||!last)               {showMsg('smsg','smsgT','Enter your first and last name.','error');return;}
-  if(!biz)                        {showMsg('smsg','smsgT','Enter your business or store name.','error');return;}
-  if(!email||!email.includes('@')){showMsg('smsg','smsgT','Enter a valid email address.','error');return;}
-  if(pw.length<6)                 {showMsg('smsg','smsgT','Password must be at least 6 characters.','error');return;}
-  if(!code)                       {showMsg('smsg','smsgT','Enter the Access Code for your role.','error');return;}
-  if(code !== ROLE_CODES[role])   {showMsg('smsg','smsgT','Invalid Access Code. Contact your administrator.','error');return;}
-
-  const btn=document.getElementById('sBtn');
+  const btn = document.getElementById('lBtn');
   btn.classList.add('loading');
 
-  try {
-    // Check if email already exists
-    const existing = await sbQuery('users?email=eq.'+encodeURIComponent(email)+'&select=id');
-    if(existing.length > 0){
-      btn.classList.remove('loading');
-      showMsg('smsg','smsgT','An account with this email already exists.','error');
-      return;
-    }
+  /* ── 1. Check if this is the default Admin ── */
+  if (email === DEFAULT_ADMIN_EMAIL && pw === DEFAULT_ADMIN_PASSWORD) {
+    seedDefaultAdmin(); // sync to Supabase in background
 
-    const approved = role === 'admin';
-    const newUser = { first, last, business: biz, email, password: pw, role, approved, deactivated: false };
-    const result = await sbQuery('users', {
-      method: 'POST',
-      body: JSON.stringify(newUser),
-    });
+    // Try to get Supabase record for a real userId
+    let supaUser = null;
+    try {
+      const rows = await sbQuery('users?email=eq.' + encodeURIComponent(email) + '&select=*');
+      supaUser = rows[0] || null;
+    } catch(e) { /* offline fallback */ }
 
+    const session = supaUser
+      ? mkSession(supaUser)
+      : { userId:'admin-default', email: DEFAULT_ADMIN_EMAIL, name:'Admin Finexy', business:'Finexy', role:'admin', initials:'AF' };
+
+    sessionStorage.setItem('finexy_session', JSON.stringify(session));
     btn.classList.remove('loading');
-    const user = result[0];
-
-    if(approved){
-      sessionStorage.setItem('finexy_session', JSON.stringify(mkSession(user)));
-      showMsg('smsg','smsgT','Account created! Redirecting…','success');
-      setTimeout(()=>window.location.href='index.html', 900);
-    } else {
-      document.getElementById('approvalNote').style.display = 'none';
-      document.getElementById('aNote').style.display        = 'none';
-      document.getElementById('postRegNote').style.display  = 'flex';
-      document.getElementById('smsg').className='fmsg';
-      document.getElementById('sFirst').value='';
-      document.getElementById('sLast').value='';
-      document.getElementById('sBiz').value='';
-      document.getElementById('sEmail').value='';
-      document.getElementById('sPw').value='';
-      document.getElementById('sCode').value='';
-      chkStr('');
-    }
-  } catch(err) {
-    btn.classList.remove('loading');
-    showMsg('smsg','smsgT','Error: ' + err.message, 'error');
+    showRoleBanner('admin');
+    showMsg('Welcome back, Admin! Redirecting…', 'success');
+    setTimeout(() => window.location.href = 'index.html', 1000);
+    return;
   }
-}
-window.doSignup=doSignup;
 
-/* ── SIGN IN ── */
-async function doLogin(){
-  const email=document.getElementById('lEmail').value.trim().toLowerCase();
-  const pw   =document.getElementById('lPw').value;
-  const role =lRole;
-  if(!email){showMsg('lmsg','lmsgT','Enter your email address.','error');return;}
-  if(!pw)   {showMsg('lmsg','lmsgT','Enter your password.','error');return;}
-
-  const btn=document.getElementById('lBtn');
-  btn.classList.add('loading');
-
+  /* ── 2. Look up by email in Supabase ── */
+  let user = null;
   try {
-    const results = await sbQuery('users?email=eq.'+encodeURIComponent(email)+'&select=*');
-    const user = results[0];
-
-    if(!user || user.password !== pw){
-      btn.classList.remove('loading');
-      showMsg('lmsg','lmsgT','Incorrect email or password.','error');
-      return;
-    }
-    if(user.role !== role){
-      btn.classList.remove('loading');
-      showMsg('lmsg','lmsgT',`This account is "${RC[user.role]?.label||user.role}", not "${RC[role].label}". Select the correct role.`,'error');
-      return;
-    }
-    if(user.deactivated){
-      btn.classList.remove('loading');
-      showMsg('lmsg','lmsgT','🚫 Your account has been deactivated. Contact your Admin or Manager to reactivate it.','error');
-      return;
-    }
-    if(user.role !== 'admin' && !user.approved){
-      btn.classList.remove('loading');
-      showMsg('lmsg','lmsgT','⏳ Your account is pending approval. Please wait for your Admin or Manager to approve it.','error');
-      return;
-    }
-
-    sessionStorage.setItem('finexy_session', JSON.stringify(mkSession(user)));
-    btn.classList.remove('loading');
-    showMsg('lmsg','lmsgT',`Welcome back, ${user.first}! Redirecting…`,'success');
-    setTimeout(()=>window.location.href='index.html', 900);
-
-  } catch(err) {
-    btn.classList.remove('loading');
-    showMsg('lmsg','lmsgT','Connection error. Please try again.','error');
-    console.error(err);
-  }
-}
-window.doLogin=doLogin;
-
-function mkSession(u){
-  return {userId:u.id,email:u.email,name:u.first+' '+u.last,business:u.business,role:u.role,initials:(u.first[0]+(u.last[0]||'')).toUpperCase()};
-}
-
-/* ── Forgot ── */
-async function doForgot(){
-  const email=document.getElementById('lEmail').value.trim().toLowerCase();
-  if(!email||!email.includes('@')){showMsg('lmsg','lmsgT','Enter your email first.','error');return;}
-  try {
-    const results = await sbQuery('users?email=eq.'+encodeURIComponent(email)+'&select=email,role,password');
-    if(!results.length){showMsg('lmsg','lmsgT','No account found with that email.','error');return;}
-    const u = results[0];
-    showMsg('lmsg','lmsgT','Password hint: check browser console (F12)','success');
-    console.log(`[Finexy] ${u.email} (${u.role}) password: ${u.password}`);
+    const rows = await sbQuery('users?email=eq.' + encodeURIComponent(email) + '&select=*');
+    user = rows[0] || null;
   } catch(e) {
-    showMsg('lmsg','lmsgT','Could not look up account.','error');
+    btn.classList.remove('loading');
+    showMsg('Connection error. Please try again.', 'error');
+    return;
   }
-}
-window.doForgot=doForgot;
 
-/* Enter key */
-document.addEventListener('keydown',e=>{
-  if(e.key!=='Enter')return;
-  document.getElementById('loginSection').classList.contains('active')?doLogin():doSignup();
+  // Wrong email
+  if (!user) {
+    btn.classList.remove('loading');
+    showMsg('No account found with that email address.', 'error');
+    return;
+  }
+
+  // Wrong password
+  if (user.password !== pw) {
+    btn.classList.remove('loading');
+    showMsg('Incorrect password.', 'error');
+    return;
+  }
+
+  // Account deactivated
+  if (user.deactivated) {
+    btn.classList.remove('loading');
+    showMsg('🚫 Your account has been deactivated. Contact your Admin or Manager.', 'error');
+    return;
+  }
+
+  // Account not yet approved
+  if (!user.approved) {
+    btn.classList.remove('loading');
+    showMsg('⏳ Your account is pending approval. Contact your Admin or Manager.', 'error');
+    return;
+  }
+
+  /* ── 3. For non-admin roles, verify the Access Code ── */
+  if (user.role !== 'admin') {
+    // Show the code field if it's not visible yet
+    document.getElementById('codeWrap').style.display = 'block';
+
+    if (!code) {
+      btn.classList.remove('loading');
+      showMsg('Enter your Access Code to continue.', 'error');
+      document.getElementById('lCode').focus();
+      showRoleBanner(user.role);
+      return;
+    }
+
+    if (!user.access_code || user.access_code !== code) {
+      btn.classList.remove('loading');
+      showMsg('Invalid Access Code. Check the code provided by your Admin or Manager.', 'error');
+      return;
+    }
+  }
+
+  /* ── 4. All checks passed — sign in ── */
+  sessionStorage.setItem('finexy_session', JSON.stringify(mkSession(user)));
+  btn.classList.remove('loading');
+  showRoleBanner(user.role);
+  const meta = ROLE_META[user.role] || ROLE_META.staff;
+  showMsg('Welcome back, ' + user.first + '! Redirecting…', 'success');
+  setTimeout(() => window.location.href = 'index.html', 1000);
+}
+window.doLogin = doLogin;
+
+/* Show a role badge above the button once the role is known */
+function showRoleBanner(role) {
+  const meta   = ROLE_META[role] || ROLE_META.staff;
+  const banner = document.getElementById('roleBanner');
+  banner.style.cssText = `display:flex;background:${meta.bg};border:1px solid ${meta.border};border-radius:var(--r);`;
+  document.getElementById('roleBannerIcon').textContent = meta.icon;
+  document.getElementById('roleBannerText').innerHTML   = 'Signing in as <strong style="color:' + meta.color + ';margin-left:4px;">' + meta.label + '</strong>';
+}
+
+/* Smart: show code field when email loses focus if the user exists and is not admin */
+document.getElementById('lEmail').addEventListener('blur', async function() {
+  const email = this.value.trim().toLowerCase();
+  if (!email || !email.includes('@')) return;
+  if (email === DEFAULT_ADMIN_EMAIL) {
+    document.getElementById('codeWrap').style.display = 'none';
+    return;
+  }
+  try {
+    const rows = await sbQuery('users?email=eq.' + encodeURIComponent(email) + '&select=role,approved,deactivated');
+    const u = rows[0];
+    if (u && u.role !== 'admin') {
+      document.getElementById('codeWrap').style.display = 'block';
+    }
+  } catch(e) { /* ignore */ }
 });
 
-/* Init — show code field by default on signup */
-pick('s','admin');
-pick('l','admin');
+function mkSession(u) {
+  return {
+    userId:   u.id,
+    email:    u.email,
+    name:     u.first + ' ' + u.last,
+    business: u.business,
+    role:     u.role,
+    initials: ((u.first?.[0] || '') + (u.last?.[0] || '')).toUpperCase(),
+  };
+}
+
+/* Enter key submits */
+document.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 </script>
 </body>
 </html>
