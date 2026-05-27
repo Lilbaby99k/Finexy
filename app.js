@@ -128,6 +128,7 @@ function denied(msg) {
 let ORDERS_DB    = [];
 let INV_DB       = [];
 let NOTIFS_DB    = [];
+let DISCOUNTS_DB = [];   // { sku, pct, expiresAt (ISO string) }
 let nextOrderNum = 1;
 let nextSkuNum   = 1;
 let currencySymbol = '$';
@@ -1430,6 +1431,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderOrdersTable();
   renderInvTable();
   renderStockAlertBanner();
+  // Build discounts and store pages
+  if (can('viewDiscounts')) renderDiscountsPage();
+  renderStorePage();
   /* ── Live sync: poll Supabase every 15 seconds ──
      • Detects new orders, status changes (rider delivered/rejected)
      • Auto-completes orders when rider marks delivered
@@ -1481,7 +1485,13 @@ async function loadOrdersFromSupabase() {
 
       if (!prev) {
         /* Brand new order */
-        const payLabel = o.payment_method === 'Pay Online' ? '💳 Online payment' : '💵 Pay on delivery';
+        const pm = o.payment_method || '';
+        const payLabel = pm === 'Pay on Delivery' ? '💵 Pay on delivery'
+                       : pm === 'Bank Transfer'   ? '🏦 Bank transfer'
+                       : pm === 'Card Payment'    ? '💳 Card payment'
+                       : pm === 'Pay Online'      ? '💳 Online payment'
+                       : pm === 'Manual Entry'    ? '📋 Manual entry'
+                       : pm ? pm : '💵 Pay on delivery';
         pushNotif('🛒 New order ' + o.id + ' from ' + o.customer + ' — ₦' + parseFloat(o.total).toLocaleString() + ' (' + payLabel + ')');
       } else if (prev.status !== o.status) {
         /* Status changed — notify */
@@ -1532,12 +1542,16 @@ async function loadInventoryFromSupabase() {
       const rating  = ratingMatch ? parseFloat(ratingMatch[1]) : 0;
       const colorsMatch = rawDesc.match(/\|\|c:([^|][^\|]*(?:\|[^|][^\|]*)*)\|\|/);
       const sizesMatch  = rawDesc.match(/\|\|s:([^|][^\|]*(?:\|[^|][^\|]*)*)\|\|/);
+      const reviewsMatch = rawDesc.match(/\|\|rv:(\[[\s\S]*?\])\|\|/);
       const colors  = colorsMatch ? colorsMatch[1].split('|').map(s=>s.trim()).filter(Boolean) : [];
       const sizes   = sizesMatch  ? sizesMatch[1].split('|').map(s=>s.trim()).filter(Boolean)  : [];
+      let reviews = [];
+      if (reviewsMatch) { try { reviews = JSON.parse(reviewsMatch[1]); } catch(e) {} }
       const cleanDesc = rawDesc
         .replace(/\|\|r:[0-9.]+\|\|/, '')
         .replace(/\|\|c:[^\|]*(?:\|[^\|]*)*\|\|/, '')
         .replace(/\|\|s:[^\|]*(?:\|[^\|]*)*\|\|/, '')
+        .replace(/\|\|rv:\[[\s\S]*?\]\|\|/, '')
         .trim();
       return {
         id:       r.id,
@@ -1552,6 +1566,7 @@ async function loadInventoryFromSupabase() {
         sizes:    sizes,
         image:    r.image             || null,
         rating:   rating,
+        reviews:  reviews,
         updated:  r.updated           || todayStr(),
       };
     });
@@ -1586,6 +1601,8 @@ function saveToStorage() {
     // Inventory is shared — NOT scoped to a single user
     localStorage.setItem(SHARED_INV_KEY,  JSON.stringify(INV_DB));
     localStorage.setItem(SHARED_SKU_KEY,  nextSkuNum);
+    // Discounts are shared across all users
+    localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
   } catch(e) {}
 }
 function loadFromStorage() {
@@ -1602,6 +1619,10 @@ function loadFromStorage() {
     if (on) nextOrderNum   = parseInt(on);
     if (sn) nextSkuNum     = parseInt(sn);
     if (cy) currencySymbol = cy;
+
+    // Load discounts
+    const dc = localStorage.getItem('finexy_discounts');
+    if (dc) DISCOUNTS_DB = JSON.parse(dc);
 
     /* Clear any stale cached orders from localStorage */
     localStorage.removeItem(userKey('orders'));
@@ -1668,6 +1689,7 @@ function navigateTo(page) {
   if (pg) pg.classList.add('active');
   const ln = document.querySelector(`.sb-link[data-page="${page}"]`);
   if (ln) ln.classList.add('active');
+  if (page === 'helpdesk') renderHelpdeskPage();
   closeSidebar();
 }
 
@@ -3068,11 +3090,13 @@ window.saveNewProduct = async function() {
   if (rating > 0)          encodedDesc = `||r:${rating}||` + encodedDesc;
   if (colorsRaw.length)    encodedDesc = `||c:${colorsRaw.join('|')}||` + encodedDesc;
   if (sizesRaw.length)     encodedDesc = `||s:${sizesRaw.join('|')}||` + encodedDesc;
+  // reviews start empty
+  encodedDesc = `||rv:[]||` + encodedDesc;
   const newProduct = { sku, name, category:cat, price, qty, low_at:lowAt, description:encodedDesc, image: window._prodImgData || null, updated: todayStr() };
   try {
     const rows = await sbQuery('inventory', { method:'POST', body: JSON.stringify(newProduct) });
     const saved = rows[0];
-    INV_DB.push({ id:saved.id, sku, name, category:cat, price, qty, lowAt, desc, colors:colorsRaw, sizes:sizesRaw, image: window._prodImgData||null, updated: todayStr(), rating });
+    INV_DB.push({ id:saved.id, sku, name, category:cat, price, qty, lowAt, desc, colors:colorsRaw, sizes:sizesRaw, image: window._prodImgData||null, updated: todayStr(), rating, reviews:[] });
     window._prodImgData = null;
     saveToStorage(); closeModal(); applyInvFilters(); renderStockAlertBanner();
     showToast(`"${name}" added to inventory!`, 'success');
@@ -3101,6 +3125,50 @@ function openProductView(p) {
           ${p.sizes.map(s => `<span style="padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface);font-size:.78rem;font-weight:700;color:var(--t1);">${s}</span>`).join('')}
         </div>
       </div>` : '';
+  /* ── Reviews ── */
+  const reviews = p.reviews || [];
+  const avgRating = reviews.length
+    ? (reviews.reduce((s, rv) => s + rv.stars, 0) / reviews.length).toFixed(1)
+    : null;
+  const starsHTML = (n) => {
+    let out = '';
+    for (let i = 1; i <= 5; i++) {
+      const clr = i <= Math.round(n) ? '#F59E0B' : 'var(--t3)';
+      out += `<span style="color:${clr};font-size:.9rem;">★</span>`;
+    }
+    return out;
+  };
+  const reviewsHTML = `
+    <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+        <div style="font-size:.8rem;font-weight:800;color:var(--t1);text-transform:uppercase;letter-spacing:.06em;">
+          ⭐ Customer Reviews ${reviews.length ? `<span style="font-weight:400;color:var(--t2);">(${reviews.length})</span>` : ''}
+        </div>
+        ${avgRating ? `<div style="display:flex;align-items:center;gap:4px;font-size:.84rem;font-weight:700;color:#F59E0B;">${starsHTML(avgRating)} <span style="color:var(--t2);font-weight:500;">${avgRating}/5</span></div>` : ''}
+      </div>
+      ${reviews.length === 0
+        ? `<p style="font-size:.8rem;color:var(--t3);text-align:center;padding:12px 0;">No reviews yet. Be the first to add one.</p>`
+        : reviews.map((rv, idx) => `
+            <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;background:var(--surface);">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="width:28px;height:28px;border-radius:50%;background:var(--brand);display:grid;place-items:center;font-size:.72rem;font-weight:800;color:#fff;flex-shrink:0;">${(rv.author||'A').charAt(0).toUpperCase()}</div>
+                  <div>
+                    <div style="font-size:.8rem;font-weight:700;color:var(--t1);">${rv.author || 'Anonymous'}</div>
+                    <div style="font-size:.66rem;color:var(--t3);">${rv.date || ''}</div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:3px;">
+                  ${[1,2,3,4,5].map(i => `<span style="font-size:.88rem;color:${i<=rv.stars?'#F59E0B':'var(--t3)'};">★</span>`).join('')}
+                </div>
+              </div>
+              <p style="font-size:.82rem;color:var(--t2);line-height:1.55;margin:0;">${rv.text || ''}</p>
+            </div>`).join('')
+      }
+      <button class="btn-ghost" style="width:100%;margin-top:8px;" onclick="openAddReview('${p.sku}')">
+        ✍️ Add Review
+      </button>
+    </div>`;
   openModal(p.name, `
     ${imgHTML}
     <div class="detail-grid">
@@ -3115,6 +3183,7 @@ function openProductView(p) {
       ${sizesHTML}
     </div>
     ${p.desc ? `<p style="font-size:.82rem;color:var(--t2);margin-top:8px;line-height:1.6">${p.desc}</p>` : ''}
+    ${reviewsHTML}
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeModal()">Close</button>
       <button class="btn-ghost" onclick="closeModal();openRestock(INV_DB.find(x=>x.sku==='${p.sku}'))">📦 Restock</button>
@@ -3252,11 +3321,13 @@ window.saveProductEdit = async function(sku) {
   p.sizes  = sizesRaw.length  ? sizesRaw  : (p.sizes  || []);
   window._editImgData = null;
   try {
-    /* Encode rating, colors, sizes in description so no extra Supabase columns are needed */
+    /* Encode rating, colors, sizes, and reviews in description so no extra Supabase columns are needed */
     let encodedDesc = p.desc || '';
     if (p.rating > 0)        encodedDesc = `||r:${p.rating}||` + encodedDesc;
     if (p.colors.length)     encodedDesc = `||c:${p.colors.join('|')}||` + encodedDesc;
     if (p.sizes.length)      encodedDesc = `||s:${p.sizes.join('|')}||` + encodedDesc;
+    const reviewsPayload = p.reviews && p.reviews.length ? p.reviews : [];
+    encodedDesc = `||rv:${JSON.stringify(reviewsPayload)}||` + encodedDesc;
     await sbQuery('inventory?sku=eq.'+encodeURIComponent(sku), {
       method: 'PATCH',
       body: JSON.stringify({ name:p.name, category:p.category, price:p.price, qty:p.qty, low_at:p.lowAt, description:encodedDesc, image:p.image, updated:p.updated }),
@@ -3411,3 +3482,814 @@ function fmtDate(str) {
 }
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+/* ══════════════════════════════════════════════════════════
+   PRODUCT REVIEWS
+   Reviews are stored as JSON in the product description field:
+   ||rv:[{"author":"...","stars":4,"text":"...","date":"..."}]||
+   Multiple reviews are supported per product.
+══════════════════════════════════════════════════════════ */
+
+/* Helper: persist updated reviews back to Supabase */
+async function saveProductReviews(sku) {
+  const p = INV_DB.find(x => x.sku === sku);
+  if (!p) return;
+  let encodedDesc = p.desc || '';
+  if (p.rating > 0)      encodedDesc = `||r:${p.rating}||` + encodedDesc;
+  if (p.colors && p.colors.length) encodedDesc = `||c:${p.colors.join('|')}||` + encodedDesc;
+  if (p.sizes && p.sizes.length)   encodedDesc = `||s:${p.sizes.join('|')}||` + encodedDesc;
+  encodedDesc = `||rv:${JSON.stringify(p.reviews || [])}||` + encodedDesc;
+  try {
+    await sbQuery('inventory?sku=eq.' + encodeURIComponent(sku), {
+      method: 'PATCH',
+      body: JSON.stringify({ description: encodedDesc, updated: todayStr() }),
+    });
+    saveToStorage();
+    applyInvFilters();
+    renderStorePage();
+  } catch(e) { showToast('Error saving review: ' + e.message, 'error'); }
+}
+
+/* Open add-review modal */
+window.openAddReview = function(sku) {
+  const p = INV_DB.find(x => x.sku === sku);
+  if (!p) return;
+  openModal(`✍️ Add Review — ${p.name}`, `
+    <div class="mform-row">
+      <div class="fg">
+        <label>Your Name</label>
+        <input id="rvAuthor" type="text" placeholder="e.g. Sarah O." maxlength="60"/>
+      </div>
+      <div class="fg">
+        <label>Rating *</label>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px;" id="rvStarRow">
+          ${[1,2,3,4,5].map(i => `
+            <button type="button" data-star="${i}"
+              onclick="window._rvStars=${i};document.querySelectorAll('#rvStarRow button').forEach((b,idx)=>{b.textContent=idx+1<=window._rvStars?'★':'☆';b.style.color=idx+1<=window._rvStars?'#F59E0B':'var(--t3)';})"
+              style="font-size:1.7rem;background:none;border:none;cursor:pointer;padding:0;line-height:1;color:var(--t3);">☆</button>`).join('')}
+          <span style="font-size:.8rem;color:var(--t2);margin-left:6px;">Click to rate</span>
+        </div>
+      </div>
+    </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Review *</label>
+        <textarea id="rvText" placeholder="Share your experience with this product…" style="min-height:90px;"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="openProductView(INV_DB.find(x=>x.sku==='${p.sku}'))">← Back</button>
+      <button class="btn-primary" onclick="doAddReview('${p.sku}')">Submit Review</button>
+    </div>`);
+  window._rvStars = 0;
+};
+
+window.doAddReview = async function(sku) {
+  const p      = INV_DB.find(x => x.sku === sku);
+  if (!p) return;
+  const author = (document.getElementById('rvAuthor')?.value.trim()) || 'Anonymous';
+  const text   = (document.getElementById('rvText')?.value.trim()) || '';
+  const stars  = window._rvStars || 0;
+  if (!text)   { showToast('Please write a review before submitting.', 'error'); return; }
+  if (!stars)  { showToast('Please select a star rating.', 'error'); return; }
+
+  if (!p.reviews) p.reviews = [];
+  p.reviews.push({ author, stars, text, date: todayStr() });
+
+  /* Recalculate average rating from all reviews */
+  const avg = p.reviews.reduce((s, rv) => s + rv.stars, 0) / p.reviews.length;
+  p.rating  = Math.round(avg * 10) / 10;
+
+  try {
+    await saveProductReviews(sku);
+    showToast(`✅ Review added for "${p.name}"!`, 'success');
+    openProductView(p);
+  } catch(e) { showToast('Error saving review: ' + e.message, 'error'); }
+};
+
+/* Delete a review (admin/manager only) */
+window.deleteReview = async function(sku, idx) {
+  if (!can('editProduct')) { denied('Delete Review'); return; }
+  const p = INV_DB.find(x => x.sku === sku);
+  if (!p || !p.reviews) return;
+  confirmAction('Delete Review', 'Remove this review permanently?', async () => {
+    p.reviews.splice(idx, 1);
+    if (p.reviews.length) {
+      const avg = p.reviews.reduce((s, rv) => s + rv.stars, 0) / p.reviews.length;
+      p.rating  = Math.round(avg * 10) / 10;
+    } else {
+      p.rating = 0;
+    }
+    await saveProductReviews(sku);
+    showToast('Review deleted.', 'success');
+    openProductView(p);
+  });
+};
+
+
+/* ══════════════════════════════════════════════════════════
+   DISCOUNTS PAGE
+   Admin/Manager can apply 15% or 50% discount to any product.
+   Each discount has an expiry date + time.
+   Discount is applied as: discountedPrice = originalPrice × (1 - pct/100)
+   Stored in localStorage under 'finexy_discounts'.
+   Expired discounts are auto-purged on page load.
+══════════════════════════════════════════════════════════ */
+
+/* Helper: get active (non-expired) discount for a product */
+function getActiveDiscount(sku) {
+  const now = Date.now();
+  return DISCOUNTS_DB.find(d => d.sku === sku && new Date(d.expiresAt).getTime() > now) || null;
+}
+window.getActiveDiscount = getActiveDiscount;
+
+/* Helper: purge expired discounts */
+function purgeExpiredDiscounts() {
+  const now = Date.now();
+  const before = DISCOUNTS_DB.length;
+  DISCOUNTS_DB = DISCOUNTS_DB.filter(d => new Date(d.expiresAt).getTime() > now);
+  if (DISCOUNTS_DB.length !== before) {
+    localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
+  }
+}
+
+/* Format a countdown */
+function fmtCountdown(expiresAt) {
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  if (diff <= 0) return 'Expired';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  const s = Math.floor((diff % 60000) / 1000);
+  if (h >= 48) {
+    const days = Math.floor(h / 24);
+    const hrs  = h % 24;
+    return `${days}d ${hrs}h remaining`;
+  }
+  if (h >= 1) return `${h}h ${m}m ${s}s remaining`;
+  return `${m}m ${s}s remaining`;
+}
+
+function renderDiscountsPage() {
+  const pg = document.getElementById('page-discounts');
+  if (!pg) return;
+  if (!can('viewDiscounts')) {
+    pg.innerHTML = `
+      <div class="ph"><h1>Discounts</h1></div>
+      <div class="blank-page">
+        <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <h2>Access Restricted</h2>
+        <p>Discounts is available to <strong>Admin</strong> and <strong>Manager</strong> roles only.</p>
+        <button class="btn-primary" onclick="navigateTo('dashboard')">← Dashboard</button>
+      </div>`;
+    return;
+  }
+
+  purgeExpiredDiscounts();
+  const sym = currencySymbol;
+
+  /* Products with active discounts */
+  const activeDiscounts = DISCOUNTS_DB.filter(d => new Date(d.expiresAt).getTime() > Date.now());
+
+  const discountRows = activeDiscounts.map(d => {
+    const p = INV_DB.find(x => x.sku === d.sku);
+    if (!p) return '';
+    const discountedPrice = p.price * (1 - d.pct / 100);
+    return `
+      <tr>
+        <td>
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${p.image ? `<img src="${p.image}" style="width:38px;height:38px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid var(--border);"/>` : `<div style="width:38px;height:38px;border-radius:8px;background:var(--surface2);display:grid;place-items:center;flex-shrink:0;font-size:.9rem;">📦</div>`}
+            <div>
+              <div style="font-weight:700;font-size:.85rem;color:var(--t1);">${p.name}</div>
+              <div style="font-size:.68rem;color:var(--t3);">${p.sku}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span style="display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:800;background:${d.pct===50?'rgba(239,68,68,.12)':'rgba(245,158,11,.12)'};color:${d.pct===50?'#FCA5A5':'#FCD34D'};">
+            ${d.pct}% OFF
+          </span>
+        </td>
+        <td>
+          <div>
+            <span style="text-decoration:line-through;color:var(--t3);font-size:.78rem;">${sym}${p.price.toFixed(2)}</span>
+            <span style="font-weight:800;color:#22C55E;font-size:.92rem;margin-left:6px;">${sym}${discountedPrice.toFixed(2)}</span>
+          </div>
+          <div style="font-size:.68rem;color:var(--t3);margin-top:2px;">You save ${sym}${(p.price - discountedPrice).toFixed(2)}</div>
+        </td>
+        <td>
+          <div style="font-size:.78rem;color:var(--t1);">${new Date(d.expiresAt).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+          <div class="disc-countdown" data-expires="${d.expiresAt}" style="font-size:.7rem;color:#F59E0B;font-weight:700;margin-top:2px;"></div>
+        </td>
+        <td>
+          <span class="badge in_stock">Active</span>
+        </td>
+        <td>
+          <div class="row-acts">
+            <button class="ra red" title="Remove Discount" onclick="removeDiscount('${d.sku}')">🗑</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const prodOptions = INV_DB.map(p => `<option value="${p.sku}" data-price="${p.price}">${p.name} — ${sym}${p.price.toFixed(2)}</option>`).join('');
+
+  /* Minimum expiry: 1 hour from now */
+  const minExpiry = new Date(Date.now() + 3600000).toISOString().slice(0, 16);
+
+  pg.innerHTML = `
+    <div class="ph">
+      <div><h1>Discounts 🏷️</h1><p class="ph-sub">Time-limited product promotions</p></div>
+      <div class="ph-actions">
+        <button class="btn-primary" onclick="openAddDiscountModal()">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add Discount
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="kpi-row" style="margin-bottom:20px;">
+      <div class="kpi-card">
+        <div class="kpi-head"><span>Active Discounts</span><div class="kpi-ico c1"><svg viewBox="0 0 24 24"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/></svg></div></div>
+        <div class="kpi-num">${activeDiscounts.length}</div>
+        <div class="kpi-foot">Currently live</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span>15% Deals</span><div class="kpi-ico c2"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></div></div>
+        <div class="kpi-num">${activeDiscounts.filter(d=>d.pct===15).length}</div>
+        <div class="kpi-foot">15% off products</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span>50% Deals</span><div class="kpi-ico c4"><svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div></div>
+        <div class="kpi-num">${activeDiscounts.filter(d=>d.pct===50).length}</div>
+        <div class="kpi-foot">50% off products</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span>Products on Sale</span><div class="kpi-ico c3"><svg viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></div></div>
+        <div class="kpi-num">${new Set(activeDiscounts.map(d=>d.sku)).size}</div>
+        <div class="kpi-foot">Unique products</div>
+      </div>
+    </div>
+
+    <!-- Active discounts table -->
+    <div class="card">
+      <h3 class="card-title" style="margin-bottom:14px;">Active Promotions</h3>
+      ${activeDiscounts.length === 0
+        ? `<div class="empty-state">
+            <svg viewBox="0 0 24 24"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/></svg>
+            <h4>No active discounts</h4>
+            <p>Click "Add Discount" to create your first promotion.</p>
+          </div>`
+        : `<div class="tbl-wrap"><table class="tbl">
+            <thead><tr>
+              <th>Product</th><th>Discount</th><th>Price</th><th>Expires</th><th>Status</th><th>Action</th>
+            </tr></thead>
+            <tbody>${discountRows}</tbody>
+          </table></div>`
+      }
+    </div>
+
+    <!-- How It Works notice -->
+    <div style="margin-top:18px;background:rgba(232,68,26,.06);border:1px solid rgba(232,68,26,.15);border-radius:12px;padding:16px 20px;font-size:.8rem;color:var(--t2);line-height:1.7;">
+      <div style="font-weight:800;color:var(--t1);margin-bottom:6px;font-size:.85rem;">💡 How Discounts Work</div>
+      <ul style="padding-left:18px;margin:0;">
+        <li><strong>15% OFF</strong> — price reduced by 15%: a ${sym}100 item becomes ${sym}85.00</li>
+        <li><strong>50% OFF</strong> — price cut in half: a ${sym}100 item becomes ${sym}50.00</li>
+        <li>On the <strong>Store page</strong>, customers see the original price crossed out with "Instead of X, get it at Y"</li>
+        <li>A <strong>live countdown timer</strong> shows exactly how long the offer lasts</li>
+        <li>Discounts <strong>auto-expire</strong> — no manual cleanup needed</li>
+      </ul>
+    </div>`;
+
+  /* Start countdown tickers */
+  startDiscountCountdowns();
+}
+window.renderDiscountsPage = renderDiscountsPage;
+
+/* ================================================================
+   HELP DESK PAGE
+   Loads contact messages from Supabase contact_messages table.
+================================================================ */
+
+let HELPDESK_MSGS   = [];
+let HELPDESK_FILTER = 'all';
+
+async function renderHelpdeskPage() {
+  const pg = document.getElementById('page-helpdesk');
+  if (!pg) return;
+
+  pg.innerHTML = `
+    <div class="ph">
+      <h1>Help Desk</h1>
+      <p class="ph-sub">Customer contact messages from the storefront</p>
+    </div>
+    <div style="padding:0 20px 20px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;justify-content:space-between;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;" id="hdFilters">
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdFilter('all')" id="hdf-all">All</button>
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdFilter('open')" id="hdf-open">Open</button>
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdFilter('replied')" id="hdf-replied">Replied</button>
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdFilter('closed')" id="hdf-closed">Closed</button>
+        </div>
+        <button class="btn-ghost" style="font-size:.78rem;" onclick="renderHelpdeskPage()">Refresh</button>
+      </div>
+      <div id="hdBody"><div class="blank-page"><p>Loading messages...</p></div></div>
+    </div>`;
+
+  try {
+    const res = await fetch(
+      SUPA_URL + '/rest/v1/contact_messages?select=*&order=created_at.desc',
+      { headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY } }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    HELPDESK_MSGS = await res.json();
+    renderHdList();
+  } catch(e) {
+    document.getElementById('hdBody').innerHTML =
+      `<div class="blank-page"><p style="color:var(--danger);">Could not load messages: ${e.message}</p>
+       <p style="font-size:.8rem;color:var(--t3);max-width:420px;margin-top:8px;">Make sure the <code>contact_messages</code> table exists in Supabase (see setup instructions).</p></div>`;
+  }
+}
+
+function hdFilter(f) {
+  HELPDESK_FILTER = f;
+  ['all','open','replied','closed'].forEach(k => {
+    const b = document.getElementById('hdf-' + k);
+    if (b) b.style.fontWeight = k === f ? '800' : '500';
+  });
+  renderHdList();
+}
+
+function renderHdList() {
+  const body = document.getElementById('hdBody');
+  if (!body) return;
+
+  const msgs = HELPDESK_FILTER === 'all'
+    ? HELPDESK_MSGS
+    : HELPDESK_MSGS.filter(m => m.status === HELPDESK_FILTER);
+
+  const total   = HELPDESK_MSGS.length;
+  const open    = HELPDESK_MSGS.filter(m => m.status === 'open').length;
+  const replied = HELPDESK_MSGS.filter(m => m.status === 'replied').length;
+  const closed  = HELPDESK_MSGS.filter(m => m.status === 'closed').length;
+
+  const statsHtml = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:20px;">
+      <div class="kpi-card"><div class="kpi-head"><span>Total</span></div><div class="kpi-num">${total}</div><div class="kpi-foot">All messages</div></div>
+      <div class="kpi-card"><div class="kpi-head"><span>Open</span></div><div class="kpi-num" style="color:#EF4444">${open}</div><div class="kpi-foot">Need response</div></div>
+      <div class="kpi-card"><div class="kpi-head"><span>Replied</span></div><div class="kpi-num" style="color:#F59E0B">${replied}</div><div class="kpi-foot">Awaiting confirmation</div></div>
+      <div class="kpi-card"><div class="kpi-head"><span>Closed</span></div><div class="kpi-num" style="color:#059669">${closed}</div><div class="kpi-foot">Resolved</div></div>
+    </div>`;
+
+  if (msgs.length === 0) {
+    body.innerHTML = statsHtml + `<div class="blank-page"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><h2>No messages</h2><p>${HELPDESK_FILTER === 'all' ? 'No contact messages yet.' : 'No ' + HELPDESK_FILTER + ' messages.'}</p></div>`;
+    return;
+  }
+
+  const rows = msgs.map(m => {
+    const date = m.created_at ? new Date(m.created_at).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+    const statusColor = m.status === 'open' ? '#EF4444' : m.status === 'replied' ? '#F59E0B' : '#059669';
+    const statusBg    = m.status === 'open' ? 'rgba(239,68,68,.1)' : m.status === 'replied' ? 'rgba(245,158,11,.1)' : 'rgba(5,150,105,.1)';
+    const statusLabel = m.status === 'open' ? 'Open' : m.status === 'replied' ? 'Replied' : 'Closed';
+    const initials    = (m.name || 'A').charAt(0).toUpperCase();
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:12px;cursor:pointer;transition:box-shadow .15s;"
+           onmouseover="this.style.boxShadow='0 4px 20px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow=''"
+           onclick="hdOpenMessage(${m.id})">
+        <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+          <div style="width:40px;height:40px;border-radius:50%;background:var(--brand);display:grid;place-items:center;font-size:.9rem;font-weight:800;color:#fff;flex-shrink:0;">${initials}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+              <span style="font-size:.9rem;font-weight:700;color:var(--t1);">${m.name || 'Unknown'}</span>
+              <span style="font-size:.74rem;font-weight:700;padding:2px 10px;border-radius:20px;background:${statusBg};color:${statusColor};">${statusLabel}</span>
+              <span style="font-size:.72rem;color:var(--t3);margin-left:auto;">${date}</span>
+            </div>
+            <div style="font-size:.78rem;color:var(--t3);margin-bottom:6px;">${m.email || ''}</div>
+            <div style="font-size:.82rem;font-weight:600;color:var(--t2);margin-bottom:4px;">${m.subject || '(no subject)'}</div>
+            <div style="font-size:.8rem;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:500px;">${m.message || ''}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  body.innerHTML = statsHtml + rows;
+}
+
+async function hdOpenMessage(id) {
+  const m = HELPDESK_MSGS.find(x => x.id === id);
+  if (!m) return;
+  const date = m.created_at ? new Date(m.created_at).toLocaleString('en-GB', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+
+  openModal('Message from ' + (m.name || 'Customer'), `
+    <div style="padding:4px 0 16px;">
+      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div><p style="font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin:0 0 4px;">Name</p><p style="font-size:.88rem;font-weight:600;color:var(--t1);margin:0;">${m.name || '-'}</p></div>
+          <div><p style="font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin:0 0 4px;">Email</p><p style="font-size:.88rem;color:var(--t1);margin:0;">${m.email || '-'}</p></div>
+        </div>
+        <div style="margin-bottom:10px;"><p style="font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin:0 0 4px;">Subject</p><p style="font-size:.88rem;font-weight:600;color:var(--t1);margin:0;">${m.subject || '(no subject)'}</p></div>
+        <div><p style="font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin:0 0 4px;">Received</p><p style="font-size:.8rem;color:var(--t2);margin:0;">${date}</p></div>
+      </div>
+      <div style="background:var(--bg);border-radius:12px;padding:16px;margin-bottom:16px;">
+        <p style="font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin:0 0 10px;">Message</p>
+        <p style="font-size:.88rem;color:var(--t1);line-height:1.7;white-space:pre-wrap;margin:0;">${m.message || ''}</p>
+      </div>
+      <div style="margin-bottom:16px;">
+        <p style="font-size:.7rem;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px;">Update Status</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdSetStatus(${m.id},'open')">Open</button>
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdSetStatus(${m.id},'replied')">Replied</button>
+          <button class="btn-ghost" style="font-size:.78rem;" onclick="hdSetStatus(${m.id},'closed')">Closed</button>
+        </div>
+      </div>
+      <a href="mailto:${m.email}?subject=Re: ${encodeURIComponent(m.subject || 'Your message')}"
+         style="display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--brand);color:#fff;border-radius:10px;font-weight:700;font-size:.84rem;text-decoration:none;letter-spacing:.04em;">
+        Reply via Email
+      </a>
+    </div>`);
+}
+
+async function hdSetStatus(id, status) {
+  try {
+    await fetch(SUPA_URL + '/rest/v1/contact_messages?id=eq.' + id, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json', 'Prefer': 'return=minimal',
+      },
+      body: JSON.stringify({ status }),
+    });
+    const msg = HELPDESK_MSGS.find(m => m.id === id);
+    if (msg) msg.status = status;
+    closeModal();
+    renderHdList();
+    showToast('Status updated to "' + status + '".', 'success');
+  } catch(e) {
+    showToast('Could not update status.', 'error');
+  }
+}
+
+window.renderHelpdeskPage = renderHelpdeskPage;
+window.hdFilter           = hdFilter;
+window.hdOpenMessage      = hdOpenMessage;
+window.hdSetStatus        = hdSetStatus;
+
+function startDiscountCountdowns() {
+  clearInterval(window._discountTicker);
+  window._discountTicker = setInterval(() => {
+    document.querySelectorAll('.disc-countdown').forEach(el => {
+      const exp = el.dataset.expires;
+      if (!exp) return;
+      el.textContent = fmtCountdown(exp);
+    });
+  }, 1000);
+}
+
+window.openAddDiscountModal = function() {
+  if (!can('viewDiscounts')) { denied('Add Discount'); return; }
+  const sym = currencySymbol;
+  const minExpiry = new Date(Date.now() + 3600000).toISOString().slice(0, 16);
+  const prodOptions = INV_DB.map(p => {
+    const existingDisc = getActiveDiscount(p.sku);
+    const label = existingDisc ? `${p.name} (${existingDisc.pct}% OFF active)` : p.name;
+    return `<option value="${p.sku}" data-price="${p.price}">${label} — ${sym}${p.price.toFixed(2)}</option>`;
+  }).join('');
+
+  openModal('🏷️ Add Discount', `
+    <div style="background:rgba(232,68,26,.07);border:1px solid rgba(232,68,26,.15);border-radius:10px;padding:12px 16px;font-size:.8rem;color:#FDBA74;margin-bottom:18px;line-height:1.6;">
+      <strong>Discount calculation:</strong><br/>
+      • 15% OFF → New price = Original × 0.85<br/>
+      • 50% OFF → New price = Original × 0.50
+    </div>
+    <div class="mform-row single">
+      <div class="fg">
+        <label>Select Product *</label>
+        <select id="discSku" onchange="(function(){
+          const sel=document.getElementById('discSku');
+          const opt=sel.options[sel.selectedIndex];
+          const price=parseFloat(opt.dataset.price)||0;
+          const pct=parseFloat(document.getElementById('discPct').value)||15;
+          const newPrice=price*(1-pct/100);
+          document.getElementById('discPreview').textContent=price>0?'New price: ${sym}'+newPrice.toFixed(2)+' (save ${sym}'+(price-newPrice).toFixed(2)+')':'';
+        })()">
+          <option value="">— Choose a product —</option>
+          ${prodOptions}
+        </select>
+      </div>
+    </div>
+    <div class="mform-row">
+      <div class="fg">
+        <label>Discount Percentage *</label>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 14px;border:2px solid var(--border);border-radius:10px;cursor:pointer;transition:border-color .15s;" id="pctLabel15">
+            <input type="radio" name="discPct" id="discPct" value="15" checked onchange="window._updateDiscPreview()"
+              style="accent-color:var(--brand);width:16px;height:16px;cursor:pointer;"/>
+            <div>
+              <div style="font-weight:800;font-size:.88rem;color:var(--t1);">15% OFF</div>
+              <div style="font-size:.7rem;color:var(--t3);">Mild promotion</div>
+            </div>
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 14px;border:2px solid var(--border);border-radius:10px;cursor:pointer;transition:border-color .15s;" id="pctLabel50">
+            <input type="radio" name="discPct" value="50" onchange="window._updateDiscPreview()"
+              style="accent-color:#EF4444;width:16px;height:16px;cursor:pointer;"/>
+            <div>
+              <div style="font-weight:800;font-size:.88rem;color:#FCA5A5;">50% OFF</div>
+              <div style="font-size:.7rem;color:var(--t3);">Flash sale</div>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div id="discPreview" style="font-size:.84rem;font-weight:700;color:#22C55E;min-height:20px;margin-bottom:4px;"></div>
+    <div class="mform-row">
+      <div class="fg">
+        <label>Discount Ends On *</label>
+        <input id="discExpiry" type="datetime-local" min="${minExpiry}" value="${minExpiry}"/>
+        <div style="font-size:.72rem;color:var(--t3);margin-top:4px;">Minimum 1 hour from now. Discount expires automatically.</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="doSaveDiscount()">Activate Discount</button>
+    </div>`);
+
+  window._updateDiscPreview = function() {
+    const sel  = document.getElementById('discSku');
+    const opt  = sel ? sel.options[sel.selectedIndex] : null;
+    const price = opt ? parseFloat(opt.dataset.price) || 0 : 0;
+    const pctEl = document.querySelector('input[name="discPct"]:checked');
+    const pct   = pctEl ? parseFloat(pctEl.value) : 15;
+    const newPrice = price * (1 - pct / 100);
+    const preview  = document.getElementById('discPreview');
+    if (preview) {
+      preview.textContent = price > 0
+        ? `New price: ${sym}${newPrice.toFixed(2)} (save ${sym}${(price - newPrice).toFixed(2)})`
+        : '';
+    }
+    /* highlight selected label */
+    document.getElementById('pctLabel15').style.borderColor = pct === 15 ? 'var(--brand)' : 'var(--border)';
+    const l50 = document.getElementById('pctLabel50');
+    if (l50) l50.style.borderColor = pct === 50 ? '#EF4444' : 'var(--border)';
+  };
+};
+
+window.doSaveDiscount = function() {
+  const sku      = document.getElementById('discSku').value;
+  const pctEl    = document.querySelector('input[name="discPct"]:checked');
+  const pct      = pctEl ? parseFloat(pctEl.value) : 0;
+  const expiresAt= document.getElementById('discExpiry').value;
+
+  if (!sku)       { showToast('Please select a product.', 'error'); return; }
+  if (!pct)       { showToast('Please choose a discount percentage.', 'error'); return; }
+  if (!expiresAt) { showToast('Please set an expiry date and time.', 'error'); return; }
+
+  const exp = new Date(expiresAt);
+  if (exp.getTime() <= Date.now() + 1800000) {
+    showToast('Expiry must be at least 30 minutes in the future.', 'error'); return;
+  }
+
+  const p = INV_DB.find(x => x.sku === sku);
+  if (!p) { showToast('Product not found.', 'error'); return; }
+
+  /* Remove any existing discount for this product */
+  DISCOUNTS_DB = DISCOUNTS_DB.filter(d => d.sku !== sku);
+  DISCOUNTS_DB.push({ sku, pct, expiresAt: exp.toISOString() });
+  localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
+
+  closeModal();
+  renderDiscountsPage();
+  renderStorePage();
+  showToast(`🏷️ ${pct}% discount activated for "${p.name}"!`, 'success');
+  pushNotif(`🏷️ ${pct}% discount added to "${p.name}" — expires ${new Date(exp).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}.`);
+};
+
+window.removeDiscount = function(sku) {
+  const p = INV_DB.find(x => x.sku === sku);
+  confirmAction('Remove Discount', `Remove the active discount on "${p ? p.name : sku}"?`, () => {
+    DISCOUNTS_DB = DISCOUNTS_DB.filter(d => d.sku !== sku);
+    localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
+    renderDiscountsPage();
+    renderStorePage();
+    showToast('Discount removed.', 'success');
+  });
+};
+
+
+/* ══════════════════════════════════════════════════════════
+   STORE PAGE  (E-Commerce Catalogue)
+   Public-facing product grid with:
+   • Product cards showing image, name, description, rating
+   • Discount badge: crossed-out original price, "Instead of X get it at Y"
+   • Countdown timer showing remaining discount time
+   • Reviews summary (avg stars + count)
+   • Add Review button accessible on any product
+══════════════════════════════════════════════════════════ */
+
+function renderStorePage() {
+  const pg = document.getElementById('page-store');
+  if (!pg) return;
+
+  purgeExpiredDiscounts();
+  const sym = currencySymbol;
+  const products = INV_DB.filter(p => p.qty > 0); // Only show in-stock products
+
+  /* ── search state ── */
+  const searchVal = window._storeSearch || '';
+  const catVal    = window._storeCat    || '';
+
+  /* Categories for filter */
+  const cats = [...new Set(INV_DB.map(p => p.category))].sort();
+  const catOptions = cats.map(c => `<option value="${c}" ${catVal===c?'selected':''}>${c}</option>`).join('');
+
+  /* Filter products */
+  let filtered = products;
+  if (searchVal) filtered = filtered.filter(p =>
+    p.name.toLowerCase().includes(searchVal.toLowerCase()) ||
+    p.category.toLowerCase().includes(searchVal.toLowerCase()) ||
+    (p.desc || '').toLowerCase().includes(searchVal.toLowerCase())
+  );
+  if (catVal) filtered = filtered.filter(p => p.category === catVal);
+
+  /* Star renderer helper */
+  function starsHTML(rating, count) {
+    if (!rating) return `<span style="font-size:.72rem;color:var(--t3);">No ratings yet</span>`;
+    const full  = Math.floor(rating);
+    const half  = rating - full >= 0.5;
+    let out = '';
+    for (let i = 1; i <= 5; i++) {
+      if (i <= full)      out += `<span style="color:#F59E0B;font-size:.85rem;">★</span>`;
+      else if (i===full+1 && half) out += `<span style="color:#F59E0B;font-size:.85rem;opacity:.6;">★</span>`;
+      else                out += `<span style="color:var(--t3);font-size:.85rem;">★</span>`;
+    }
+    if (count) out += `<span style="font-size:.7rem;color:var(--t3);margin-left:4px;">(${count})</span>`;
+    return out;
+  }
+
+  /* Product card builder */
+  function productCard(p) {
+    const disc         = getActiveDiscount(p.sku);
+    const hasDiscount  = disc !== null;
+    const origPrice    = p.price;
+    const salePrice    = hasDiscount ? origPrice * (1 - disc.pct / 100) : origPrice;
+    const reviews      = p.reviews || [];
+    const avgRating    = reviews.length ? (reviews.reduce((s, rv) => s + rv.stars, 0) / reviews.length) : (p.rating || 0);
+
+    const priceHTML = hasDiscount
+      ? `<div style="display:flex;flex-direction:column;gap:2px;">
+           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+             <span style="text-decoration:line-through;color:var(--t3);font-size:.82rem;">Instead of ${sym}${origPrice.toFixed(2)}</span>
+           </div>
+           <div style="font-size:1.1rem;font-weight:900;color:#22C55E;">Get it at ${sym}${salePrice.toFixed(2)}</div>
+           <div style="font-size:.7rem;color:#86EFAC;">You save ${sym}${(origPrice - salePrice).toFixed(2)} (${disc.pct}%)</div>
+         </div>`
+      : `<div style="font-size:1.05rem;font-weight:800;color:var(--t1);">${sym}${origPrice.toFixed(2)}</div>`;
+
+    const discBadge = hasDiscount
+      ? `<div style="position:absolute;top:10px;right:10px;background:${disc.pct===50?'#EF4444':'#F59E0B'};color:#fff;font-size:.68rem;font-weight:900;padding:4px 10px;border-radius:20px;letter-spacing:.04em;box-shadow:0 2px 8px rgba(0,0,0,.3);">
+           ${disc.pct}% OFF
+         </div>`
+      : '';
+
+    const timerHTML = hasDiscount
+      ? `<div class="store-disc-timer" data-expires="${disc.expiresAt}" style="display:flex;align-items:center;gap:5px;margin-top:6px;font-size:.7rem;font-weight:700;color:#F59E0B;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:7px;padding:4px 10px;">
+           ⏱️ <span class="timer-text"></span>
+         </div>`
+      : '';
+
+    const imgHTML = p.image
+      ? `<img src="${p.image}" alt="${p.name}" style="width:100%;height:180px;object-fit:cover;"/>`
+      : `<div style="width:100%;height:180px;background:var(--surface2);display:grid;place-items:center;">
+           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="1.3"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+         </div>`;
+
+    const colorsChips = (p.colors && p.colors.length && !(p.colors.length===1&&p.colors[0]==='#374151'))
+      ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;">${p.colors.slice(0,5).map(c=>`<span title="${c}" style="width:16px;height:16px;border-radius:50%;background:${c};border:1.5px solid rgba(0,0,0,.15);display:inline-block;"></span>`).join('')}${p.colors.length>5?`<span style="font-size:.66rem;color:var(--t3);align-self:center;">+${p.colors.length-5}</span>`:''}</div>`
+      : '';
+
+    const sizesChips = (p.sizes && p.sizes.length && !(p.sizes.length===1&&p.sizes[0]==='One Size'))
+      ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">${p.sizes.slice(0,4).map(s=>`<span style="padding:1px 7px;border-radius:5px;border:1px solid var(--border);font-size:.65rem;font-weight:700;color:var(--t2);background:var(--bg);">${s}</span>`).join('')}${p.sizes.length>4?`<span style="font-size:.66rem;color:var(--t3);align-self:center;">+${p.sizes.length-4}</span>`:''}</div>`
+      : '';
+
+    const stockBadge = p.qty <= p.lowAt
+      ? `<span style="font-size:.66rem;padding:2px 7px;border-radius:10px;background:rgba(245,158,11,.12);color:#FCD34D;font-weight:700;">⚠️ Low Stock</span>`
+      : `<span style="font-size:.66rem;padding:2px 7px;border-radius:10px;background:rgba(34,197,94,.1);color:#86EFAC;font-weight:700;">✅ In Stock</span>`;
+
+    return `
+      <div style="border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--surface);display:flex;flex-direction:column;transition:box-shadow .2s,transform .2s;position:relative;"
+           onmouseover="this.style.boxShadow='0 8px 30px rgba(0,0,0,.18)';this.style.transform='translateY(-3px)'"
+           onmouseout="this.style.boxShadow='';this.style.transform=''">
+        <!-- Image -->
+        <div style="position:relative;overflow:hidden;">
+          ${imgHTML}
+          ${discBadge}
+        </div>
+        <!-- Body -->
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px;flex:1;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px;">
+            <div>
+              <div style="font-weight:800;font-size:.9rem;color:var(--t1);line-height:1.3;">${p.name}</div>
+              <div style="font-size:.72rem;color:var(--t3);margin-top:1px;">${p.category} · ${p.sku}</div>
+            </div>
+            ${stockBadge}
+          </div>
+          ${p.desc ? `<p style="font-size:.77rem;color:var(--t2);line-height:1.5;margin:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${p.desc}</p>` : ''}
+          ${colorsChips}
+          ${sizesChips}
+          <!-- Rating row -->
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <div style="display:flex;align-items:center;gap:2px;">${starsHTML(avgRating, reviews.length)}</div>
+          </div>
+          <!-- Price -->
+          <div style="margin-top:4px;">${priceHTML}</div>
+          ${timerHTML}
+        </div>
+        <!-- Actions -->
+        <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+          <button class="btn-ghost" style="flex:1;font-size:.78rem;padding:7px 0;" onclick="openProductView(INV_DB.find(x=>x.sku==='${p.sku}'))">👁 View Details</button>
+          <button class="btn-ghost" style="font-size:.78rem;padding:7px 12px;" onclick="openAddReview('${p.sku}')" title="Add Review">✍️</button>
+          ${can('viewDiscounts') ? `<button class="btn-ghost" style="font-size:.78rem;padding:7px 12px;" onclick="openAddDiscountModal();setTimeout(()=>{const s=document.getElementById('discSku');if(s)s.value='${p.sku}';window._updateDiscPreview&&window._updateDiscPreview();},100)" title="Add Discount">🏷️</button>` : ''}
+        </div>
+      </div>`;
+  }
+
+  pg.innerHTML = `
+    <div class="ph">
+      <div><h1>Store 🛍️</h1><p class="ph-sub">Live product catalogue</p></div>
+    </div>
+
+    <!-- Store KPIs -->
+    <div class="kpi-row" style="margin-bottom:20px;">
+      <div class="kpi-card">
+        <div class="kpi-head"><span>Total Products</span><div class="kpi-ico c1"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div></div>
+        <div class="kpi-num">${INV_DB.length}</div>
+        <div class="kpi-foot">In catalogue</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span>Available</span><div class="kpi-ico c2"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div></div>
+        <div class="kpi-num">${products.length}</div>
+        <div class="kpi-foot">In stock now</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span>On Sale</span><div class="kpi-ico c4"><svg viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg></div></div>
+        <div class="kpi-num">${DISCOUNTS_DB.filter(d=>new Date(d.expiresAt).getTime()>Date.now()).length}</div>
+        <div class="kpi-foot">Active discounts</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-head"><span>With Reviews</span><div class="kpi-ico c3"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div></div>
+        <div class="kpi-num">${INV_DB.filter(p=>p.reviews&&p.reviews.length>0).length}</div>
+        <div class="kpi-foot">Reviewed products</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+      <div class="mini-search" style="flex:1;min-width:200px;">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="storeSearch" type="text" placeholder="Search products…" value="${searchVal}"
+          oninput="window._storeSearch=this.value;renderStorePage()"/>
+      </div>
+      <select id="storeCatFilter" style="padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--t1);font-size:.83rem;cursor:pointer;"
+        onchange="window._storeCat=this.value;renderStorePage()">
+        <option value="">All Categories</option>
+        ${catOptions}
+      </select>
+      ${searchVal||catVal ? `<button class="btn-ghost" style="font-size:.8rem;padding:8px 14px;" onclick="window._storeSearch='';window._storeCat='';renderStorePage();">✕ Clear</button>` : ''}
+    </div>
+
+    <!-- Product grid -->
+    ${filtered.length === 0
+      ? `<div class="empty-state" style="padding:60px 0;">
+           <svg viewBox="0 0 24 24"><path d="M3 9l1-5h16l1 5"/><path d="M3 9h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/></svg>
+           <h4>${INV_DB.length === 0 ? 'No products in inventory yet' : 'No products match your search'}</h4>
+           <p>${INV_DB.length === 0 ? 'Add products from the Inventory page to see them here.' : 'Try clearing your filters.'}</p>
+           ${INV_DB.length === 0 && can('addProduct') ? `<button class="btn-primary" onclick="navigateTo('inventory')">Go to Inventory</button>` : ''}
+         </div>`
+      : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;">
+           ${filtered.map(productCard).join('')}
+         </div>
+         <div style="font-size:.78rem;color:var(--t3);text-align:center;margin-top:16px;">
+           Showing ${filtered.length} of ${products.length} available product${products.length!==1?'s':''}
+         </div>`
+    }`;
+
+  /* Start store countdown timers */
+  clearInterval(window._storeTicker);
+  window._storeTicker = setInterval(() => {
+    document.querySelectorAll('.store-disc-timer').forEach(el => {
+      const exp   = el.dataset.expires;
+      if (!exp) return;
+      const diff  = new Date(exp).getTime() - Date.now();
+      const tEl   = el.querySelector('.timer-text');
+      if (!tEl) return;
+      if (diff <= 0) {
+        tEl.textContent = '⌛ Offer ended';
+        el.style.color  = 'var(--t3)';
+        /* Re-render page to remove expired discount */
+        setTimeout(() => { purgeExpiredDiscounts(); renderStorePage(); renderDiscountsPage(); }, 500);
+      } else {
+        tEl.textContent = fmtCountdown(exp);
+      }
+    });
+  }, 1000);
+}
+window.renderStorePage = renderStorePage;
