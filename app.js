@@ -1417,7 +1417,7 @@ const S = {
 ══════════════════════ */
 document.addEventListener('DOMContentLoaded', async () => {
   await initSession();
-  loadFromStorage();
+  await loadFromStorage();
   await loadInventoryFromSupabase();
   await loadOrdersFromSupabase();
   initSidebar();
@@ -1535,7 +1535,7 @@ async function loadOrdersFromSupabase() {
 
 async function loadInventoryFromSupabase() {
   try {
-    const rows = await sbQuery('inventory?select=*&order=created_at.asc');
+    const rows = await sbQuery('inventory?select=*&order=id.asc');
     INV_DB = rows.map(r => {
       const rawDesc = r.description || '';
       const ratingMatch = rawDesc.match(/\|\|r:([0-9.]+)\|\|/);
@@ -1596,33 +1596,48 @@ const SHARED_SKU_KEY    = 'finexy_shared_skuNum';
 
 function saveToStorage() {
   try {
-    localStorage.setItem(userKey('orders'),   JSON.stringify(ORDERS_DB));
     localStorage.setItem(userKey('orderNum'), nextOrderNum);
-    // Inventory is shared — NOT scoped to a single user
-    localStorage.setItem(SHARED_INV_KEY,  JSON.stringify(INV_DB));
+    // Inventory is Supabase-only — NOT scoped to a single user
+    localStorage.removeItem(SHARED_INV_KEY);
     localStorage.setItem(SHARED_SKU_KEY,  nextSkuNum);
     // Discounts are shared across all users
     localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
   } catch(e) {}
 }
-function loadFromStorage() {
+async function loadFromStorage() {
   try {
     /* NOTE: ORDERS_DB is NOT loaded from localStorage.
        It is always fetched fresh from Supabase so that
        deletions and changes by any role are immediately
        reflected on all dashboards. */
-    const i  = localStorage.getItem(SHARED_INV_KEY);
+    localStorage.removeItem(SHARED_INV_KEY);
     const on = localStorage.getItem(userKey('orderNum'));
     const sn = localStorage.getItem(SHARED_SKU_KEY);
     const cy = localStorage.getItem(CURRENT_USER ? 'finexy_currency_' + CURRENT_USER.userId : 'finexy_currency');
-    if (i)  INV_DB         = JSON.parse(i);
     if (on) nextOrderNum   = parseInt(on);
     if (sn) nextSkuNum     = parseInt(sn);
     if (cy) currencySymbol = cy;
 
-    // Load discounts
-    const dc = localStorage.getItem('finexy_discounts');
-    if (dc) DISCOUNTS_DB = JSON.parse(dc);
+    // Load discounts from Supabase (source of truth), fallback to localStorage cache
+    try {
+      const dRes = await fetch(
+        SUPA_URL + '/rest/v1/discounts?select=*&expires_at=gt.' + new Date().toISOString(),
+        { headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY } }
+      );
+      if (dRes.ok) {
+        const dRows = await dRes.json();
+        DISCOUNTS_DB = dRows.map(r => ({ sku: r.sku, pct: r.pct, expiresAt: r.expires_at }));
+        localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
+      } else {
+        /* Supabase failed — fall back to localStorage cache */
+        const dc = localStorage.getItem('finexy_discounts');
+        if (dc) DISCOUNTS_DB = JSON.parse(dc);
+      }
+    } catch(_) {
+      /* Network error — fall back to localStorage cache */
+      const dc = localStorage.getItem('finexy_discounts');
+      if (dc) DISCOUNTS_DB = JSON.parse(dc);
+    }
 
     /* Clear any stale cached orders from localStorage */
     localStorage.removeItem(userKey('orders'));
@@ -3591,7 +3606,7 @@ window.deleteReview = async function(sku, idx) {
    Admin/Manager can apply 15% or 50% discount to any product.
    Each discount has an expiry date + time.
    Discount is applied as: discountedPrice = originalPrice × (1 - pct/100)
-   Stored in localStorage under 'finexy_discounts'.
+   Stored in Supabase 'discounts' table (sku, pct, expires_at).
    Expired discounts are auto-purged on page load.
 ══════════════════════════════════════════════════════════ */
 
@@ -3602,12 +3617,20 @@ function getActiveDiscount(sku) {
 }
 window.getActiveDiscount = getActiveDiscount;
 
-/* Helper: purge expired discounts */
-function purgeExpiredDiscounts() {
+/* Helper: purge expired discounts from Supabase + local cache */
+async function purgeExpiredDiscounts() {
   const now = Date.now();
   const before = DISCOUNTS_DB.length;
   DISCOUNTS_DB = DISCOUNTS_DB.filter(d => new Date(d.expiresAt).getTime() > now);
   if (DISCOUNTS_DB.length !== before) {
+    /* Delete expired rows from Supabase */
+    try {
+      await fetch(SUPA_URL + '/rest/v1/discounts?expires_at=lt.' + new Date().toISOString(), {
+        method: 'DELETE',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+      });
+    } catch(_) {}
+    /* Keep localStorage in sync as a cache */
     localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
   }
 }
@@ -4033,7 +4056,7 @@ window.openAddDiscountModal = function() {
   };
 };
 
-window.doSaveDiscount = function() {
+window.doSaveDiscount = async function() {
   const sku      = document.getElementById('discSku').value;
   const pctEl    = document.querySelector('input[name="discPct"]:checked');
   const pct      = pctEl ? parseFloat(pctEl.value) : 0;
@@ -4051,7 +4074,35 @@ window.doSaveDiscount = function() {
   const p = INV_DB.find(x => x.sku === sku);
   if (!p) { showToast('Product not found.', 'error'); return; }
 
-  /* Remove any existing discount for this product */
+  /* Remove any existing discount for this product in Supabase */
+  try {
+    await fetch(SUPA_URL + '/rest/v1/discounts?sku=eq.' + encodeURIComponent(sku), {
+      method: 'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+    });
+  } catch(_) {}
+
+  /* Save new discount to Supabase */
+  try {
+    const res = await fetch(SUPA_URL + '/rest/v1/discounts', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPA_KEY,
+        'Authorization': 'Bearer ' + SUPA_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ sku, pct, expires_at: exp.toISOString() })
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      showToast('Failed to save discount: ' + err, 'error'); return;
+    }
+  } catch(e) {
+    showToast('Network error saving discount: ' + e.message, 'error'); return;
+  }
+
+  /* Update local cache */
   DISCOUNTS_DB = DISCOUNTS_DB.filter(d => d.sku !== sku);
   DISCOUNTS_DB.push({ sku, pct, expiresAt: exp.toISOString() });
   localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
@@ -4065,7 +4116,15 @@ window.doSaveDiscount = function() {
 
 window.removeDiscount = function(sku) {
   const p = INV_DB.find(x => x.sku === sku);
-  confirmAction('Remove Discount', `Remove the active discount on "${p ? p.name : sku}"?`, () => {
+  confirmAction('Remove Discount', `Remove the active discount on "${p ? p.name : sku}"?`, async () => {
+    /* Delete from Supabase */
+    try {
+      await fetch(SUPA_URL + '/rest/v1/discounts?sku=eq.' + encodeURIComponent(sku), {
+        method: 'DELETE',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+      });
+    } catch(_) {}
+    /* Update local cache */
     DISCOUNTS_DB = DISCOUNTS_DB.filter(d => d.sku !== sku);
     localStorage.setItem('finexy_discounts', JSON.stringify(DISCOUNTS_DB));
     renderDiscountsPage();
